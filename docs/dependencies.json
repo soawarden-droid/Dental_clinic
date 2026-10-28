@@ -1,0 +1,165 @@
+[
+  {
+    "name": "altgraph",
+    "version": "0.17.5",
+    "requires": []
+  },
+  {
+    "name": "iniconfig",
+    "version": "2.3.1",
+    "requires": []
+  },
+  {
+    "name": "jalali_core",
+    "version": "1.0.0",
+    "requires": []
+  },
+  {
+    "name": "jdatetime",
+    "version": "5.2.0",
+    "requires": [
+      "jalali-core>=1.0"
+    ]
+  },
+  {
+    "name": "packaging",
+    "version": "26.3",
+    "requires": []
+  },
+  {
+    "name": "pluggy",
+    "version": "1.7.0",
+    "requires": []
+  },
+  {
+    "name": "pyinstaller",
+    "version": "6.12.0",
+    "requires": [
+      "setuptools>=42.0.0",
+      "altgraph",
+      "pyinstaller-hooks-contrib>=2025.1",
+      "packaging>=22.0",
+      "importlib-metadata>=4.6; python_version < \"3.10\"",
+      "macholib>=1.8; sys_platform == \"darwin\"",
+      "pefile!=2024.8.26,>=2022.5.30; sys_platform == \"win32\"",
+      "pywin32-ctypes>=0.2.1; sys_platform == \"win32\"",
+      "argcomplete; extra == \"completion\"",
+      "pytest>=2.7.3; extra == \"hook-testing\"",
+      "execnet>=1.5.0; extra == \"hook-testing\"",
+      "psutil; extra == \"hook-testing\""
+    ]
+  },
+  {
+    "name": "pyinstaller-hooks-contrib",
+    "version": "2026.9",
+    "requires": [
+      "importlib_metadata>=4.6; python_version < \"3.10\"",
+      "packaging>=22.0"
+    ]
+  },
+  {
+    "name": "PySide6",
+    "version": "6.8.3",
+    "requires": [
+      "shiboken6 ==6.8.3",
+      "PySide6-Essentials ==6.8.3",
+      "PySide6-Addons ==6.8.3"
+    ]
+  },
+  {
+    "name": "PySide6_Addons",
+    "version": "6.8.3",
+    "requires": [
+      "shiboken6 ==6.8.3",
+      "PySide6-Essentials ==6.8.3"
+    ]
+  },
+  {
+    "name": "PySide6_Essentials",
+    "version": "6.8.3",
+    "requires": [
+      "shiboken6 ==6.8.3"
+    ]
+  },
+  {
+    "name": "pytest",
+    "version": "8.3.5",
+    "requires": [
+      "colorama; sys_platform == \"win32\"",
+      "exceptiongroup>=1.0.0rc8; python_version < \"3.11\"",
+      "iniconfig",
+      "packaging",
+      "pluggy<2,>=1.5",
+      "tomli>=1; python_version < \"3.11\"",
+      "argcomplete; extra == \"dev\"",
+      "attrs>=19.2; extra == \"dev\"",
+      "hypothesis>=3.56; extra == \"dev\"",
+      "mock; extra == \"dev\"",
+      "pygments>=2.7.2; extra == \"dev\"",
+      "requests; extra == \"dev\"",
+      "setuptools; extra == \"dev\"",
+      "xmlschema; extra == \"dev\""
+    ]
+  },
+  {
+    "name": "setuptools",
+    "version": "84.2.1",
+    "requires": [
+      "pytest!=8.1.*,>=6; extra == \"test\"",
+      "virtualenv>=13.0.0; extra == \"test\"",
+      "wheel>=0.44.0; extra == \"test\"",
+      "pip>=19.1; extra == \"test\"",
+      "packaging>=26.3; extra == \"test\"",
+      "jaraco.envs>=2.2; extra == \"test\"",
+      "pytest-xdist>=3; extra == \"test\"",
+      "jaraco.path>=3.7.2; extra == \"test\"",
+      "build[virtualenv]>=1.0.3; extra == \"test\"",
+      "filelock>=3.4.0; extra == \"test\"",
+      "ini2toml[lite]>=0.14; extra == \"test\"",
+      "tomli-w>=1.0.0; extra == \"test\"",
+      "pytest-timeout; extra == \"test\"",
+      "pytest-perf; sys_platform != \"cygwin\" and extra == \"test\"",
+      "jaraco.develop>=7.21; (python_version >= \"3.9\" and sys_platform != \"cygwin\") and extra == \"test\"",
+      "pytest-home>=0.5; extra == \"test\"",
+      "pytest-subprocess; extra == \"test\"",
+      "pyproject-hooks!=1.1; extra == \"test\"",
+      "jaraco.test>=5.5; extra == \"test\"",
+      "sphinx>=3.5; extra == \"doc\"",
+      "jaraco.packaging>=9.3; extra == \"doc\"",
+      "rst.linker>=1.9; extra == \"doc\"",
+      "furo; extra == \"doc\"",
+      "sphinx-lint; extra == \"doc\"",
+      "jaraco.tidelift>=1.4; extra == \"doc\"",
+      "pygments-github-lexers==0.0.5; extra == \"doc\"",
+      "sphinx-favicon; extra == \"doc\"",
+      "sphinx-inline-tabs; extra == \"doc\"",
+      "sphinx-reredirects; extra == \"doc\"",
+      "sphinxcontrib-towncrier; extra == \"doc\"",
+      "sphinx-notfound-page<2,>=1; extra == \"doc\"",
+      "pyproject-hooks!=1.1; extra == \"doc\"",
+      "towncrier<24.7; extra == \"doc\"",
+      "packaging>=26.3; extra == \"core\"",
+      "more_itertools>=8.8; extra == \"core\"",
+      "jaraco.text>=3.7; extra == \"core\"",
+      "importlib_metadata>=6; python_version < \"3.10\" and extra == \"core\"",
+      "tomli>=2.0.1; python_version < \"3.11\" and extra == \"core\"",
+      "wheel>=0.43.0; extra == \"core\"",
+      "jaraco.functools>=4; extra == \"core\"",
+      "more_itertools; extra == \"core\"",
+      "pytest-checkdocs>=2.14; extra == \"check\"",
+      "pytest-ruff>=0.2.1; sys_platform != \"cygwin\" and extra == \"check\"",
+      "ruff>=0.13.0; sys_platform != \"cygwin\" and extra == \"check\"",
+      "pytest-cov; extra == \"cover\"",
+      "pytest-enabler>=3.4; extra == \"enabler\"",
+      "pytest-mypy>=1.0.1; platform_python_implementation != \"PyPy\" and extra == \"type\"",
+      "mypy==1.18.*; extra == \"type\"",
+      "importlib_metadata>=7.0.2; python_version < \"3.10\" and extra == \"type\"",
+      "jaraco.develop>=7.21; sys_platform != \"cygwin\" and extra == \"type\""
+    ]
+  },
+  {
+    "name": "shiboken6",
+    "version": "6.8.3",
+    "requires": []
+  }
+]

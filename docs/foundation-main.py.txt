@@ -1,0 +1,16 @@
+import sys
+from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtCore import QTimer
+from clinic.storage import Store
+
+app = QApplication(sys.argv)
+store = Store()
+n = int(store.setting('foundation_launches', '0')) + 1
+store.set_setting('foundation_launches', n)
+w = QLabel(f'Faramarz Dental Clinic\nEmbedded SQLite • launch {n}\nNo server required')
+w.resize(560, 280)
+w.show()
+if '--smoke' in sys.argv:
+    print(f'SQLite persistence: launch {n}', flush=True)
+    QTimer.singleShot(400, app.quit)
+sys.exit(app.exec())

@@ -1,0 +1,31 @@
+{
+  "platform": "Linux-6.17.0-35-generic-x86_64-with-glibc2.39",
+  "python": "3.12.3",
+  "cpu": "Intel(R) Core(TM) i5-6200U CPU @ 2.30GHz",
+  "logical_cpus": 4,
+  "dataset_patients": 10000,
+  "queries_each": 100,
+  "search": {
+    "Synthetic patient 099": {
+      "median_ms": 9.136,
+      "p95_ms": 21.545,
+      "max_ms": 35.793
+    },
+    "+937000099": {
+      "median_ms": 6.832,
+      "p95_ms": 12.751,
+      "max_ms": 15.44
+    },
+    "P-009999": {
+      "median_ms": 5.003,
+      "p95_ms": 8.552,
+      "max_ms": 9.948
+    },
+    "not found": {
+      "median_ms": 5.123,
+      "p95_ms": 8.921,
+      "max_ms": 13.406
+    }
+  },
+  "limitations": "Warm queries in a temporary profile on this development host; not a clinic laptop benchmark."
+}

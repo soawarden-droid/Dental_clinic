@@ -1,0 +1,10 @@
+{
+  "version": "0.1.0",
+  "target": "Ubuntu 24.04 amd64",
+  "package": "faramarz-dental_0.1.0_amd64.deb",
+  "package_bytes": 50759548,
+  "package_sha256": "6ac6959d8b7b5a34046cd13708f1bda46cd0ed871c0eb774f74d9b32afa4fb4a",
+  "executable_sha256": "f04a065e9cf8ba6b9146fc1bc28a7fee39223b7b5bfd5ec5a72ce98948d33c06",
+  "automated_tests": 23,
+  "offline_packaged_acceptance": "passed"
+}

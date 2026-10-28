@@ -1,0 +1,34 @@
+{
+  "binary": "/tmp/faramarz-delivery-package/opt/faramarz-dental/faramarz-dental",
+  "network": "isolated user/network namespace, no network interfaces enabled",
+  "profile": "Fresh empty profile per trial; no human authentication time",
+  "platform": "xcb Qt rendering on Ubuntu 24.04; warm OS disk cache after build",
+  "trials": [
+    {
+      "trial": 1,
+      "wall_seconds": 1.381,
+      "resident_memory": "90004 kB"
+    },
+    {
+      "trial": 2,
+      "wall_seconds": 1.233,
+      "resident_memory": "90152 kB"
+    },
+    {
+      "trial": 3,
+      "wall_seconds": 1.081,
+      "resident_memory": "90068 kB"
+    },
+    {
+      "trial": 4,
+      "wall_seconds": 1.282,
+      "resident_memory": "90076 kB"
+    },
+    {
+      "trial": 5,
+      "wall_seconds": 1.253,
+      "resident_memory": "90100 kB"
+    }
+  ],
+  "median_seconds": 1.253
+}

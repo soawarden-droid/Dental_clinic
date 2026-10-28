@@ -1,0 +1,32 @@
+name: Windows installer
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.3'
+          cache: pip
+      - name: Build and test
+        shell: pwsh
+        run: scripts/build-windows.ps1
+      - name: Packaged offline-independent smoke
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $env:FARAMARZ_PROFILE = "$env:RUNNER_TEMP\faramarz-smoke"
+          $p = Start-Process dist/faramarz-dental/faramarz-dental.exe -ArgumentList '--smoke' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Packaged smoke failed' }
+          $p = Start-Process dist/faramarz-dental/faramarz-dental.exe -ArgumentList '--demo','--capture',"$env:RUNNER_TEMP\screenshots" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Packaged UI capture failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FaramarzDental-Windows
+          path: |
+            dist/*Setup*.exe
+            ${{ runner.temp }}/screenshots/
