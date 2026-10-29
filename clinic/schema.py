@@ -35,3 +35,32 @@ INSERT INTO lab_payments(lab_id,date,amount) SELECT id,sent,paid FROM labs WHERE
 CREATE INDEX supplier_payment_date ON supplier_payments(date);
 CREATE INDEX lab_payment_date ON lab_payments(date);
 ''')
+
+# Existing optional columns already allow NULL. Normalize only blank values;
+# never guess missing ages/dates or rebuild the parent table and its links.
+MIGRATIONS.append(r'''
+ALTER TABLE patients ADD COLUMN gender TEXT;
+ALTER TABLE patients ADD COLUMN email TEXT;
+UPDATE patients SET father=NULLIF(TRIM(father),''), address=NULLIF(TRIM(address),''),
+ dob=NULLIF(TRIM(dob),''), estimated_age=NULLIF(TRIM(estimated_age),''),
+ history=NULLIF(TRIM(history),''), allergies=NULLIF(TRIM(allergies),''),
+ medications=NULLIF(TRIM(medications),''), alerts=NULLIF(TRIM(alerts),''),
+ emergency=NULLIF(TRIM(emergency),''), consent=NULLIF(TRIM(consent),'');
+CREATE TRIGGER patient_essential_insert BEFORE INSERT ON patients
+WHEN NEW.name IS NULL OR TRIM(NEW.name)='' OR NEW.phone IS NULL OR TRIM(NEW.phone)=''
+BEGIN SELECT RAISE(ABORT,'Name and phone are required'); END;
+CREATE TRIGGER patient_essential_update BEFORE UPDATE OF name,phone ON patients
+WHEN NEW.name IS NULL OR TRIM(NEW.name)='' OR ((NEW.phone IS NULL OR TRIM(NEW.phone)='') AND NEW.phone IS NOT OLD.phone)
+BEGIN SELECT RAISE(ABORT,'Name and phone are required'); END;
+''')
+
+MIGRATIONS.append(r'''
+ALTER TABLE attachments ADD COLUMN image_owned INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE image_assets(slot TEXT PRIMARY KEY,original_id INTEGER NOT NULL REFERENCES attachments(id),preview_id INTEGER NOT NULL REFERENCES attachments(id));
+''')
+
+# Normalize legacy blank defaults even for direct inserts, keeping optional values nullable.
+MIGRATIONS[2] += r'''
+CREATE TRIGGER patient_optional_insert AFTER INSERT ON patients BEGIN UPDATE patients SET father=NULLIF(TRIM(father),''),address=NULLIF(TRIM(address),''),dob=NULLIF(TRIM(dob),''),estimated_age=NULLIF(TRIM(estimated_age),''),history=NULLIF(TRIM(history),''),allergies=NULLIF(TRIM(allergies),''),medications=NULLIF(TRIM(medications),''),alerts=NULLIF(TRIM(alerts),''),emergency=NULLIF(TRIM(emergency),''),consent=NULLIF(TRIM(consent),''),gender=NULLIF(TRIM(gender),''),email=NULLIF(TRIM(email),'') WHERE id=NEW.id; END;
+CREATE TRIGGER patient_optional_update AFTER UPDATE OF father,address,dob,estimated_age,history,allergies,medications,alerts,emergency,consent,gender,email ON patients WHEN (NEW.father IS NOT NULL AND TRIM(NEW.father)='') OR (NEW.address IS NOT NULL AND TRIM(NEW.address)='') OR (NEW.dob IS NOT NULL AND TRIM(NEW.dob)='') OR (NEW.estimated_age IS NOT NULL AND TRIM(NEW.estimated_age)='') OR (NEW.history IS NOT NULL AND TRIM(NEW.history)='') OR (NEW.allergies IS NOT NULL AND TRIM(NEW.allergies)='') OR (NEW.medications IS NOT NULL AND TRIM(NEW.medications)='') OR (NEW.alerts IS NOT NULL AND TRIM(NEW.alerts)='') OR (NEW.emergency IS NOT NULL AND TRIM(NEW.emergency)='') OR (NEW.consent IS NOT NULL AND TRIM(NEW.consent)='') OR (NEW.gender IS NOT NULL AND TRIM(NEW.gender)='') OR (NEW.email IS NOT NULL AND TRIM(NEW.email)='') BEGIN UPDATE patients SET father=NULLIF(TRIM(father),''),address=NULLIF(TRIM(address),''),dob=NULLIF(TRIM(dob),''),estimated_age=NULLIF(TRIM(estimated_age),''),history=NULLIF(TRIM(history),''),allergies=NULLIF(TRIM(allergies),''),medications=NULLIF(TRIM(medications),''),alerts=NULLIF(TRIM(alerts),''),emergency=NULLIF(TRIM(emergency),''),consent=NULLIF(TRIM(consent),''),gender=NULLIF(TRIM(gender),''),email=NULLIF(TRIM(email),'') WHERE id=NEW.id; END;
+'''

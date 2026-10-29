@@ -4,21 +4,24 @@ A native offline dental clinic desktop application for Dr. Farshad Faramarz, Kha
 
 ## Install and use
 
-Ubuntu **24.04 amd64** is the build target. Open `dist/faramarz-dental_0.1.0_amd64.deb` with Ubuntu's package installer and install it, then launch **Faramarz Dental Clinic** from Applications. The package declares system runtime libraries. Python, Qt developer tools, Node, Flutter, a server, or an internet account are not needed to run the installed application. The application itself has no network dependency; OS dependencies should already be present or be supplied via Ubuntu packages for an entirely offline installation.
+Ubuntu **24.04 amd64** is the build target. Open `dist/faramarz-dental_0.2.0_amd64.deb` with Ubuntu's package installer and install it, then launch **Faramarz Dental Clinic** from Applications. The package declares system runtime libraries. Python, Qt developer tools, Node, Flutter, a server, or an internet account are not needed to run the installed application. The application itself has no network dependency; OS dependencies should already be present or be supplied via Ubuntu packages for an entirely offline installation.
 
 The first launch asks you to create your own local administrator. There are no shared credentials and no sample patients in the normal profile. Read the in-app Help → User guide, [English guide](docs/USER_GUIDE.md), or [Dari guide](docs/USER_GUIDE.fa_AF.md). Keep complete backups on a separate drive.
 
 For package installation from a developer terminal:
 
 ```bash
-sudo apt install ./dist/faramarz-dental_0.1.0_amd64.deb
+sudo apt install ./dist/faramarz-dental_0.2.0_amd64.deb
 ```
 
 Records are in the user's application data directory, separate from `/opt/faramarz-dental`. Package updates and removal do not delete those records. Local login restricts actions in the app; SQLite, attachments and backup archives are **not encrypted**. OS account protection and disk encryption provide protection at rest.
 
 ## What works
 
-- Patient demographics, warnings for duplicates, clinical alerts, archive/restore, photos and managed files.
+- Name and phone are the only required patient fields; optional information stays NULL. Shared family numbers are allowed after a duplicate warning.
+- Ivory/rose and dark plum themes, English/Dari typography, patient workspace tabs and a dashboard with real collections, treatment and appointment charts.
+- Image Add/Replace/Remove/Preview/Restore controls, background opacity and reduced motion. Original files remain untouched.
+- Patient demographics, clinical alerts, archive/restore, photos and managed files.
 - Visits and follow-ups, exact FDI adult/primary chart, planned/completed treatment records and editable procedure catalogue.
 - Itemized invoices, discounts, partial payments, refunds, void/reissue corrections, receipts, A4/80 mm PDF and print preview.
 - Agenda/day/seven-day reception views, walk-ins, appointment conflicts and waiting status.
@@ -63,7 +66,7 @@ unshare -Urn dist/faramarz-dental/faramarz-dental --verify /tmp/faramarz-offline
 .venv/bin/python main.py --demo
 ```
 
-`--verify` drives the real account, patient, visit, treatment, invoice and payment dialogs, writes PDFs/screenshots, renders all pages in both languages/themes, and restores a complete backup into a fresh profile. It never opens the normal application profile. `--smoke` only tests a SQLite settings write/read and short window launch; use a temporary `FARAMARZ_PROFILE` when running it. `FARAMARZ_PROFILE` is a developer/testing override, not part of the clinic's normal setup.
+`--verify` drives the real account, patient, visit, treatment, invoice and payment dialogs, checks NULL optional fields, writes PDFs/screenshots, renders all pages in both languages/themes, and restores a complete backup into a fresh profile. It never opens the normal application profile. `--smoke` only tests a SQLite settings write/read and short window launch; use a temporary `FARAMARZ_PROFILE` when running it. `FARAMARZ_PROFILE` is a developer/testing override, not part of the clinic's normal setup.
 
 ## Windows preparation
 

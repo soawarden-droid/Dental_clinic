@@ -4,7 +4,7 @@ import secrets
 from pathlib import Path
 from time import perf_counter
 from PySide6.QtWidgets import QDialog,QComboBox,QTextEdit,QLineEdit,QApplication
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer,QEventLoop
 from PySide6.QtPrintSupport import QPrinter
 from .widgets import Form
 from .ui import Window,authenticate,PAGES
@@ -40,8 +40,11 @@ def run(app,service,assets,destination,started):
                 else:widget.setValue(value)
             d.validate()
         QTimer.singleShot(30,submit)
-    fill(dict(name='Fictional Acceptance / مریض آزمایشی',estimated_age='8',allergies='Fictional alert'))
+    fill(dict(name='Fictional Acceptance / مریض آزمایشی',phone='0701234567'))
     w.new_patient();assert w.pid==1
+    row=service.s.one('SELECT * FROM patients WHERE id=1')
+    assert all(row[key] is None for key in ('father','dob','estimated_age','gender','address','email','allergies','history','emergency'))
+    result['checks'].append('Name-and-phone-only registration: omitted optional fields are SQL NULL')
     fill(dict(notes='Acceptance test visit'));w.new_visit(1)
     fill(dict(procedure='Filling',price='2500.29',tooth='55',status='completed'));w.add_treatment('55')
     fill(dict(discount='0.29'));w.issue_invoice();w.invoice_table.setCurrentCell(0,0)
@@ -53,10 +56,13 @@ def run(app,service,assets,destination,started):
     finally:PrintDialog.exec=original
     assert service.invoice_totals(1)==dict(total=250000,paid=100000,balance=150000)
     result['checks'].append('Real account and patient → visit → treatment → invoice → partial payment → PDF dialogs')
+    def settle():
+        loop=QEventLoop();QTimer.singleShot(400,loop.quit);loop.exec()
     for lang,theme,filename,patient in [('en','light','overview-en-light.png',False),('en','dark','patient-en-dark.png',True),('fa_AF','light','patient-dari-light.png',True),('fa_AF','dark','overview-dari-dark.png',False)]:
         service.s.set_setting('language',lang);service.s.set_setting('theme',theme);w.current='Overview';w.build()
         for page in PAGES:w.navigate(page);app.processEvents()
-        w.patient_detail(1) if patient else w.overview();app.processEvents();w.grab().save(str(output/filename))
+        w.patient_detail(1) if patient else w.overview();settle();w.grab().save(str(output/filename))
+    w.image_settings();settle();w.grab().save(str(output/'image-settings-dari-dark.png'))
     assert not errors,errors
     result['checks'].append('All pages render in English/Dari and light/dark at 1366×768')
     from . import i18n

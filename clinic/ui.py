@@ -10,12 +10,13 @@ from .widgets import Form,Table,button,label
 from .domain import today,now,money,afn,amount_text,display_date,parse_date,ADULT,CHILD
 from .i18n import tr
 from . import i18n
-from .theme import stylesheet
+from .theme import stylesheet,colors,motion_enabled,apply_app_theme,tooth_style
 from .printing import PrintDialog,invoice_html,document_html
+from .components import Card,Hero,StatCard,Chart
 from .backup import create_backup,restore_backup,apply_retention
 
 PAGES=['Overview','Patients','Appointments','Materials','Purchases','Expenses','Laboratory','Reports','Clinic profile','Settings']
-PATIENT_FIELDS=[('name','Full name','line',''),('father','Father’s name','line',''),('phone','Phone','phone',''),('address','Address','line',''),('dob','Birth date','date_optional',''),('estimated_age','Estimated age at registration','line',''),('history','Medical history','text',''),('allergies','Allergies','text',''),('medications','Medications','text',''),('alerts','Clinical alerts','text',''),('emergency','Emergency contact','line',''),('consent','Consent notes','text','')]
+PATIENT_FIELDS=[('name','Full name','line',''),('phone','Phone','phone',''),('father','Father’s name','line',''),('address','Address','line',''),('dob','Birth date','date_optional',''),('estimated_age','Estimated age at registration','line',''),('gender','Gender',[(None,'Not provided'),('female','Female'),('male','Male'),('other','Other')],None),('email','Email','line',''),('history','Medical history','text',''),('allergies','Allergies','text',''),('medications','Medications','text',''),('alerts','Clinical alerts','text',''),('emergency','Emergency contact','line',''),('consent','Consent notes','text','')]
 
 
 class Job(QThread):
@@ -83,7 +84,7 @@ class Window(QMainWindow):
         self.nav={}
         for name in PAGES:
             if name in ('Overview','Materials','Reports'):nav_layout.addWidget(label({'Overview':'Care','Materials':'Operations','Reports':'Clinic'}[name],'subtitle'))
-            b=self.act(name,lambda n=name:self.navigate(n)); b.setObjectName('nav'); b.setCheckable(True); nav_layout.addWidget(b); self.nav[name]=b
+            b=self.act(name,lambda n=name:self.navigate(n)); b.setObjectName('nav'); b.setIcon(QIcon(str(self.assets/'icons'/(name.lower().replace(' ','-')+'.svg'))));b.setCheckable(True); nav_layout.addWidget(b); self.nav[name]=b
             if self.svc.user and self.svc.user['role']!='admin' and name in ('Reports','Clinic profile','Settings'):b.setEnabled(False)
         nav_layout.addStretch()
         self.nav_scroll=QScrollArea();self.nav_scroll.setWidgetResizable(True);self.nav_scroll.setFrameShape(QFrame.NoFrame);self.nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.nav_scroll.setWidget(nav_body);sl.addWidget(self.nav_scroll,1)
@@ -108,9 +109,7 @@ class Window(QMainWindow):
         browser.setMarkdown(Path(path).read_text(encoding='utf-8'));l.addWidget(browser);l.addWidget(button('Close',d.accept));d.exec()
 
     def apply_theme(self):
-        mode=self.s.setting('theme','system')
-        dark=mode=='dark' or (mode=='system' and QApplication.instance().styleHints().colorScheme()==Qt.ColorScheme.Dark)
-        QApplication.instance().setStyleSheet(stylesheet(dark)+("\nQWidget {font-family:'Noto Sans Arabic';} QPushButton#nav {text-align:right;}" if i18n.LANG=='fa_AF' else ''))
+        apply_app_theme(self.s)
 
     def switch_language(self):
         self.s.set_setting('language',self.lang.currentData()); self.build()
@@ -125,7 +124,7 @@ class Window(QMainWindow):
             old=self.pages.widget(0); self.pages.removeWidget(old); old.deleteLater()
         scroll=QScrollArea(); scroll.setWidgetResizable(True)
         body=QWidget(); layout=QVBoxLayout(body); layout.setContentsMargins(0,4,12,12); layout.setSpacing(17)
-        layout.addWidget(label(title,'title'))
+        if title:layout.addWidget(label(title,'title'))
         if subtitle: layout.addWidget(label(subtitle,'subtitle'))
         scroll.setWidget(body); self.pages.addWidget(scroll)
         return layout
@@ -148,32 +147,74 @@ class Window(QMainWindow):
         if name in self.nav:self.nav_scroll.ensureWidgetVisible(self.nav[name])
         for n,b in self.nav.items(): b.setChecked(n==name)
         if not self.svc.user: return
-        dispatch={'Overview':self.overview,'Patients':self.patient_list,'Appointments':self.appointments,'Materials':self.materials,'Purchases':self.purchases,'Expenses':self.expenses,'Laboratory':self.labs,'Reports':self.reports,'Clinic profile':self.profile,'Settings':self.settings}
+        dispatch={'Overview':self.overview,'Patients':self.patient_list,'Appointments':self.appointments,'Materials':self.materials,'Purchases':self.purchases,'Expenses':self.expenses,'Laboratory':self.labs,'Reports':self.reports,'Clinic profile':self.profile,'Settings':self.settings,'images':self.image_settings,'detail':lambda:self.patient_detail(self.pid)}
         self.guard(dispatch[name])
 
     def refresh(self):
-        if self.current=='detail' and self.pid: self.patient_detail(self.pid)
+        if self.current=='images':self.image_settings()
+        elif self.current=='detail' and self.pid: self.patient_detail(self.pid)
         else: self.navigate(self.current)
         self.statusBar().showMessage(tr('Saved successfully'),4000)
 
     def overview(self):
-        layout=self.page('Today at the clinic','A calm place to manage your day.')
-        self.actions(layout,[('New patient',self.new_patient,True),('New visit',self.quick_visit),('Record payment',self.quick_payment)])
-        day=today()
-        apps=self.s.rows('SELECT a.*,p.name FROM appointments a JOIN patients p ON p.id=a.patient_id WHERE substr(starts,1,10)=? ORDER BY starts',(day,))
-        collected=self.s.one('SELECT COALESCE(SUM(amount),0) n FROM payments WHERE date=?',(day,))['n']
-        outstanding=sum(self.svc.invoice_totals(r['id'])['balance'] for r in self.s.rows('SELECT id FROM invoices'))
-        cards=QHBoxLayout()
-        for title,value in [('Today’s appointments',str(len(apps))),('Waiting patients',str(sum(r['status']=='arrived' for r in apps))),('Collected today',afn(collected)),('Outstanding balances',afn(outstanding))]:
-            card=QFrame(); card.setObjectName('card'); cv=QVBoxLayout(card); cv.setContentsMargins(18,18,18,18); cv.addWidget(label(title,'subtitle')); cv.addWidget(label(value,'metric')); cards.addWidget(card)
+        days=getattr(self,'dashboard_days',30);data=self.svc.dashboard(days);self.dashboard_data=data
+        layout=self.page('')
+        doctor=self.s.setting('display_dari' if i18n.LANG=='fa_AF' else 'display_english','داکتر فرشاد فرامرز' if i18n.LANG=='fa_AF' else 'Dr. Farshad Faramarz')
+        hero=Hero(doctor,self.date(today())+'   ·   '+tr('A little care, every day.'))
+        self.actions(hero.content,[('New patient',self.new_patient,True),('New visit',self.quick_visit),('Record payment',self.quick_payment)])
+        background=self.s.setting('clinic_background')
+        if background:hero.set_background(self.s.root/'attachments'/background,int(self.s.setting('background_opacity','15')))
+        layout.addWidget(hero)
+        cards=QHBoxLayout();cards.setSpacing(12)
+        stats=[('Today’s visits',str(len(data['visits'])),'Recorded visits',lambda:self.dashboard_records('visits')),
+               ('Collected today',afn(data['collected_today']),'Payments less refunds',lambda:self.dashboard_records('today_payments')),
+               ('Outstanding balances',afn(data['outstanding']),'Open patient invoices',lambda:self.dashboard_records('balances')),
+               ('Upcoming appointments',str(len(data['upcoming'])),'Next seven days',lambda:self.dashboard_records('upcoming'))]
+        for title,value,caption,callback in stats:
+            card=StatCard(title,value,caption);card.clicked.connect(lambda fn=callback:self.guard(fn));cards.addWidget(card,1)
         layout.addLayout(cards)
-        layout.addWidget(label('Today’s appointments','brand'))
-        self.table(layout,['Time','Patient','Status'],apps,[lambda r:r['starts'][11:16],'name',lambda r:tr(r['status'])],lambda r:self.patient_detail(r['patient_id']))
-        tabs=QTabWidget(); layout.addWidget(tabs)
-        datasets=[('Recent visits',self.s.rows('SELECT v.*,p.name FROM visits v JOIN patients p ON p.id=v.patient_id ORDER BY v.id DESC LIMIT 8'),['Patient','Date','Doctor'],['name',lambda r:self.date(r['date']),'doctor']),('Upcoming follow-ups',self.s.rows("SELECT v.*,p.name FROM visits v JOIN patients p ON p.id=v.patient_id WHERE followup>=? ORDER BY followup LIMIT 12",(day,)),['Patient','Follow-up'],['name',lambda r:self.date(r['followup'])]),('Low stock',self.s.rows('SELECT m.*,COALESCE(SUM(s.quantity),0) quantity FROM materials m LEFT JOIN stock s ON s.material_id=m.id GROUP BY m.id HAVING quantity<=minimum'),['Name','In stock','Minimum stock'],['name','quantity','minimum'])]
-        for title,rows,heads,keys in datasets:
-            t=Table(heads,rows,keys); tabs.addTab(t,tr(title))
-        layout.addStretch()
+        heading=QHBoxLayout();heading.addWidget(label('The rhythm of your clinic','brand'),1);period=QComboBox()
+        for n in (7,30,90):period.addItem(tr('Last {days} days').format(days=n),n)
+        period.setCurrentIndex((7,30,90).index(days))
+        def change_period():self.dashboard_days=period.currentData();self.overview()
+        period.currentIndexChanged.connect(change_period);heading.addWidget(period);layout.addLayout(heading)
+        charts=QHBoxLayout();charts.setSpacing(12);animated=motion_enabled(self.s)
+        trend=Card('Net collections','Payments less refunds');trend_chart=Chart('trend',data['trend'],animated,self.date,bool(data['ledger']));trend.content.addWidget(trend_chart);trend_chart.activated.connect(lambda:self.guard(lambda:self.dashboard_records('payments')));charts.addWidget(trend,2)
+        distribution=Card('Treatment mix','Completed treatments');donut=Chart('donut',data['distribution'],animated);distribution.content.addWidget(donut);donut.activated.connect(lambda:self.guard(lambda:self.dashboard_records('treatments')))
+        for row in data['distribution'][:3]:
+            b=self.act(tr(row['procedure'])+'  ·  '+str(row['count']),lambda proc=row['procedure']:self.dashboard_records('treatments',proc));b.setObjectName('badge');distribution.content.addWidget(b)
+        charts.addWidget(distribution,1)
+        status=Card('Appointment status','Saved appointments in this period');status_chart=Chart('status',data['statuses'],animated);status.content.addWidget(status_chart);status_chart.categoryActivated.connect(lambda state:self.guard(lambda:self.dashboard_records('statuses',state)));status_chart.activated.connect(lambda:self.guard(lambda:self.dashboard_records('statuses')));charts.addWidget(status,1)
+        layout.addLayout(charts)
+        lower=QHBoxLayout();lower.setSpacing(12)
+        agenda=Card('Today’s agenda');t=self.table(agenda.content,['Time','Patient','Status'],data['appointments'],[lambda r:r['starts'][11:16],'name','status'],lambda r:self.patient_detail(r['patient_id']));t.setMinimumHeight(190);lower.addWidget(agenda,2)
+        recent=Card('Recent patients')
+        for row in data['recent_patients']:
+            recent.content.addWidget(self.act(row['name']+'  ·  '+f"P-{row['id']:06}",lambda pid=row['id']:self.patient_detail(pid)))
+        if not data['recent_patients']:recent.content.addWidget(label('Register your first patient to begin.','subtitle'))
+        recent.content.addStretch();lower.addWidget(recent,1);layout.addLayout(lower)
+        alerts=QHBoxLayout();stock=Card('Low stock');follow=Card('Upcoming follow-ups')
+        for row in data['low_stock'][:5]:stock.content.addWidget(self.act(row['name']+'  ·  '+str(row['quantity'])+' '+row['unit'],lambda:self.navigate('Materials')))
+        if not data['low_stock']:stock.content.addWidget(label('No low-stock alerts.','subtitle'))
+        for row in data['followups']:follow.content.addWidget(self.act(row['name']+'  ·  '+self.date(row['followup']),lambda pid=row['patient_id']:self.patient_detail(pid)))
+        if not data['followups']:follow.content.addWidget(label('No upcoming follow-ups.','subtitle'))
+        alerts.addWidget(stock,1);alerts.addWidget(follow,1);layout.addLayout(alerts);layout.addStretch()
+
+    def dashboard_records(self,kind,procedure=None):
+        data=self.dashboard_data;start,end=data['start'],data['end']
+        if kind=='visits':rows=data['visits'];headers=['Patient','Date','Doctor'];keys=['name',lambda r:self.date(r['date']),'doctor']
+        elif kind in ('payments','today_payments'):
+            rows=[r for r in data['ledger'] if kind=='payments' or r['date']==today()];headers=['Patient','Date','Amount','Method'];keys=['name',lambda r:self.date(r['date']),lambda r:afn(r['amount']),'method']
+        elif kind=='balances':rows=data['balances'];headers=['Patient','Invoice number','Remaining'];keys=['name',lambda r:f"INV-{r['id']:06}",lambda r:afn(r['balance'])]
+        elif kind=='upcoming':rows=data['upcoming'];headers=['Patient','Date','Time','Status'];keys=['name',lambda r:self.date(r['starts'][:10]),lambda r:r['starts'][11:16],'status']
+        elif kind=='treatments':
+            rows=self.s.rows("SELECT t.*,v.patient_id,v.date,p.name FROM treatments t JOIN visits v ON v.id=t.visit_id JOIN patients p ON p.id=v.patient_id WHERE v.date BETWEEN ? AND ? AND t.status='completed'"+(' AND t.procedure=?' if procedure else '')+' ORDER BY t.id DESC',(start,end,procedure) if procedure else (start,end));headers=['Patient','Date','Procedure','Tooth'];keys=['name',lambda r:self.date(r['date']),'procedure','tooth']
+        else:
+            rows=self.s.rows('SELECT a.*,p.name FROM appointments a JOIN patients p ON p.id=a.patient_id WHERE substr(a.starts,1,10) BETWEEN ? AND ?'+(' AND a.status=?' if procedure else '')+' ORDER BY a.starts',(start,end,procedure) if procedure else (start,end));headers=['Patient','Date','Status'];keys=['name',lambda r:self.date(r['starts'][:10]),'status']
+        d=QDialog(self);d.setWindowTitle(tr('Underlying records'));d.resize(850,550);l=QVBoxLayout(d);l.addWidget(label('Underlying records','title'));l.addWidget(label(self.date(start)+' — '+self.date(end),'subtitle'));table=self.table(l,headers,rows,keys)
+        def open_patient():
+            r=table.selected();d.accept();self.patient_detail(r['patient_id'],3 if kind in ('payments','today_payments','balances') else 0)
+        self.actions(l,[('Patient',open_patient,True),('Close',d.accept)]);d.exec()
 
     def choose_patient(self,title='Patient'):
         d=QDialog(self); d.setWindowTitle(tr(title)); d.resize(680,500); l=QVBoxLayout(d); search=QLineEdit(); search.setPlaceholderText(tr('Search patients')); l.addWidget(search)
@@ -192,7 +233,7 @@ class Window(QMainWindow):
 
     def quick_payment(self):
         pid=self.choose_patient('Record payment')
-        if pid: self.patient_detail(pid,1)
+        if pid: self.patient_detail(pid,3)
 
     def patient_list(self,term=''):
         layout=self.page('Patients')
@@ -224,88 +265,109 @@ class Window(QMainWindow):
         self.svc.allowed(); self.current='detail'; self.pid=pid
         for name,b in self.nav.items():b.setChecked(name=='Patients')
         p=self.s.one('SELECT * FROM patients WHERE id=?',(pid,))
-        layout=self.page(p['name'],f"P-{pid:06}   ·   {p['phone']}   ·   {p['address']}")
-        if p['alerts'] or p['allergies']: layout.addWidget(label(tr('Clinical alerts')+': '+p['alerts']+'   '+tr('Allergies')+': '+p['allergies'],'alert'))
+        balance=sum(r['balance'] for r in self.svc.balances(pid))
+        layout=self.page(p['name'],f"P-{pid:06}   ·   {p['phone'] or '—'}"+'   ·   '+tr('Balance')+': '+afn(balance))
+        if p['alerts'] or p['allergies']: layout.addWidget(label(tr('Clinical alerts')+': '+(p['alerts'] or '—')+'   '+tr('Allergies')+': '+(p['allergies'] or '—'),'alert'))
         photo=self.s.setting(f'patient_photo_{pid}')
         if photo:
             image=QLabel();image.setPixmap(QPixmap(str(self.s.root/'attachments'/photo)).scaled(80,80,Qt.KeepAspectRatio,Qt.SmoothTransformation));layout.addWidget(image)
         self.actions(layout,[('New visit',lambda:self.new_visit(pid),True),('Edit patient',lambda:self.edit_patient(pid)),('Patient photograph',lambda:self.patient_photo(pid)),('Restore patient' if p['archived'] else 'Archive',lambda:self.archive_patient(p))])
         tabs=QTabWidget(); layout.addWidget(tabs,1)
-        for title,fn in [('Visits & dental chart',self.clinical_tab),('Billing',self.billing_tab),('Medical history',self.history_tab),('Documents',self.documents_tab),('Prescriptions',self.prescriptions_tab)]:
-            w=QWidget(); l=QVBoxLayout(w); l.setContentsMargins(0,16,0,0); l.setSpacing(14);
-            if self.svc.user['role']!='admin' and title!='Billing':continue
-            fn(l,p); tabs.addTab(w,tr(title))
-        tabs.setCurrentIndex(tab if self.svc.user['role']=='admin' else 0)
+        sections=[('Overview',self.patient_overview),('Visits & treatments',lambda l,p:self.clinical_tab(l,p,False,True)),('Dental chart',lambda l,p:self.clinical_tab(l,p,True,False)),('Invoices & payments',self.billing_tab),('Photos & documents',self.patient_documents),('Prescriptions',self.prescriptions_tab)]
+        for title,fn in sections:
+            if self.svc.user['role']!='admin' and title not in ('Overview','Invoices & payments'):continue
+            w=QWidget();l=QVBoxLayout(w);l.setContentsMargins(0,16,0,0);l.setSpacing(14);fn(l,p);tabs.addTab(w,tr(title))
+        self.patient_tabs=tabs
+        tabs.setCurrentIndex(tab if self.svc.user['role']=='admin' else (1 if tab==3 else 0))
+
+    def patient_overview(self,l,p):
+        row=QHBoxLayout();demographics=Card('Patient information');clinical=Card('Medical history')
+        for key,title in [('father','Father’s name'),('dob','Birth date'),('estimated_age','Estimated age at registration'),('gender','Gender'),('address','Address'),('email','Email'),('emergency','Emergency contact')]:
+            value=self.date(p[key]) if key=='dob' and p[key] else p[key]
+            demographics.content.addWidget(label(tr(title)+'  ·  '+(str(value) if value is not None and value!='' else tr('Not provided')),'subtitle'))
+        demographics.content.addWidget(self.act('Edit details',lambda:self.edit_section(p,'Patient information',{'father','dob','estimated_age','gender','address','email','emergency'})))
+        row.addWidget(demographics,1)
+        if self.svc.user['role']=='admin':
+            for key,title in [('history','Medical history'),('allergies','Allergies'),('medications','Medications'),('alerts','Clinical alerts'),('consent','Consent notes')]:clinical.content.addWidget(label(tr(title)+'  ·  '+(p[key] or tr('Not provided')),'subtitle'))
+            clinical.content.addWidget(self.act('Edit medical notes',lambda:self.edit_section(p,'Medical history',{'history','allergies','medications','alerts','consent'})));row.addWidget(clinical,1)
+        l.addLayout(row);l.addStretch()
+
+    def edit_section(self,p,title,keys):
+        v=self.form(title,[field for field in PATIENT_FIELDS if field[0] in keys],p)
+        if v:self.svc.save_patient(v,p['id']);self.patient_detail(p['id'])
+
+    def patient_documents(self,l,p):
+        self.image_card(l,'patient_photo_'+str(p['id']),'Patient photograph')
+        self.documents_tab(l,p)
 
     def patient_photo(self,pid):
-        self.svc.allowed(clinical=True)
-        path,_=QFileDialog.getOpenFileName(self,tr('Choose image'),'','Images (*.png *.jpg *.jpeg)')
-        if path:
-            self.attach_file(path,pid,lambda meta:(self.s.set_setting(f'patient_photo_{pid}',meta[-1]['stored']),self.patient_detail(pid)),True)
+        self.svc.allowed(clinical=True);self.patient_detail(pid,4)
 
     def archive_patient(self,p):
         if self.confirm('Archive this patient? Their records will be preserved.'):
             self.svc.archive(p['id'],not p['archived']); self.patient_detail(p['id'])
 
     def history_tab(self,l,p):
-        for key,title,_,_ in PATIENT_FIELDS[4:]:
+        for key,title,_,_ in PATIENT_FIELDS[2:]:
             l.addWidget(label(title,'brand')); l.addWidget(label((self.date(p[key]) if key=='dob' and p[key] else p[key]) or 'Not supplied'))
         l.addStretch()
 
-    def clinical_tab(self,l,p):
+    def clinical_tab(self,l,p,show_chart=True,show_history=True):
         visits=self.s.rows('SELECT * FROM visits WHERE patient_id=? ORDER BY id DESC',(p['id'],))
         treatments=self.s.rows('SELECT t.*,v.date,v.doctor FROM treatments t JOIN visits v ON v.id=t.visit_id WHERE v.patient_id=? ORDER BY t.id DESC',(p['id'],))
-        bar=QHBoxLayout(); self.visit_choice=QComboBox(); self.visit_choice.setLayoutDirection(Qt.LeftToRight)
+        bar=QHBoxLayout(); self.visit_choice=QComboBox();choice=self.visit_choice;self.visit_choice.setLayoutDirection(Qt.LeftToRight)
         for v in visits: self.visit_choice.addItem(f"V-{v['id']} · {self.date(v['date'])} · {v['doctor']}",v['id'])
-        bar.addWidget(self.visit_choice,1); bar.addWidget(self.act('Add treatment',self.add_treatment,True)); bar.addWidget(self.act('Issue invoice',self.issue_invoice)); l.addLayout(bar)
-        dentition=QComboBox(); dentition.addItem(tr('Permanent teeth'),False); dentition.addItem(tr('Primary teeth'),True); l.addWidget(dentition)
-        chart=QWidget(); chart.setFixedHeight(100); grid=QGridLayout(chart); grid.setSpacing(5)
-        def draw():
-            while grid.count():
-                item=grid.takeAt(0)
-                if item.widget(): item.widget().deleteLater()
-            rows=CHILD if dentition.currentData() else ADULT
-            for row,teeth in enumerate(rows):
-                for col,tooth in enumerate(teeth):
-                    b=self.act(str(tooth),lambda t=tooth:self.add_treatment(str(t)))
-                    b.setMinimumWidth(34); b.setMinimumHeight(44); b.setStyleSheet('padding:5px;border-radius:12px 12px 8px 8px;')
-                    relevant=[r for r in treatments if r['tooth']==str(tooth)]
-                    if relevant:
-                        color='#dfb25a' if any(r['status']=='planned' for r in relevant) else '#149a96'
-                        b.setStyleSheet(f'padding:5px;border:2px solid {color};border-radius:12px 12px 8px 8px;')
-                        b.setToolTip('\n'.join(tr(r['procedure'])+' · '+tr(r['status']) for r in relevant))
-                    grid.addWidget(b,row,col)
-            chart.setLayoutDirection(Qt.LeftToRight)
-        dentition.currentIndexChanged.connect(draw); draw()
-        l.addWidget(label('Patient right → left','subtitle')); l.addWidget(label('Upper jaw','subtitle')); l.addWidget(chart); l.addWidget(label('Lower jaw','subtitle')); l.addWidget(label('Select a tooth to record work. Teal: completed · Amber: planned.','subtitle'))
-        self.treatment_table=self.table(l,['Treatment number','Date','Tooth','Procedure','Price','Status'],treatments,['id',lambda r:self.date(r['date']),'tooth','procedure',lambda r:afn(r['price']),'status'],self.treatment_details)
-        self.actions(l,[('Complete treatment',self.complete_treatment)])
-        vt=Table(['Date','Notes','Follow-up'],visits,[lambda r:self.date(r['date']),'notes',lambda r:self.date(r['followup'])]); l.addWidget(vt)
+        bar.addWidget(self.visit_choice,1); bar.addWidget(self.act('Add treatment',lambda:self.add_treatment(visit_id=choice.currentData()),True)); bar.addWidget(self.act('Issue invoice',lambda:self.issue_invoice(choice.currentData()))); l.addLayout(bar)
+        if show_chart:
+            dentition=QComboBox(); dentition.addItem(tr('Permanent teeth'),False); dentition.addItem(tr('Primary teeth'),True); l.addWidget(dentition)
+            chart=QWidget(); chart.setFixedHeight(100); grid=QGridLayout(chart); grid.setSpacing(5)
+            def draw():
+                while grid.count():
+                    item=grid.takeAt(0)
+                    if item.widget(): item.widget().deleteLater()
+                rows=CHILD if dentition.currentData() else ADULT
+                for row,teeth in enumerate(rows):
+                    for col,tooth in enumerate(teeth):
+                        b=self.act(str(tooth),lambda t=tooth:self.add_treatment(str(t),choice.currentData()))
+                        b.setMinimumWidth(34); b.setMinimumHeight(44); b.setStyleSheet(tooth_style())
+                        relevant=[r for r in treatments if r['tooth']==str(tooth)]
+                        if relevant:
+                            state='planned' if any(r['status']=='planned' for r in relevant) else 'completed'
+                            b.setStyleSheet(tooth_style(state))
+                            b.setToolTip('\n'.join(tr(r['procedure'])+' · '+tr(r['status']) for r in relevant))
+                        grid.addWidget(b,row,col)
+                chart.setLayoutDirection(Qt.LeftToRight)
+            dentition.currentIndexChanged.connect(draw); draw()
+            l.addWidget(label('Patient right → left','subtitle')); l.addWidget(label('Upper jaw','subtitle')); l.addWidget(chart); l.addWidget(label('Lower jaw','subtitle')); l.addWidget(label('Select a tooth to record work. Teal: completed · Amber: planned.','subtitle'))
+        if show_history:
+            self.treatment_table=self.table(l,['Treatment number','Date','Tooth','Procedure','Price','Status'],treatments,['id',lambda r:self.date(r['date']),'tooth','procedure',lambda r:afn(r['price']),'status'],self.treatment_details)
+            self.actions(l,[('Complete treatment',self.complete_treatment)])
+            vt=Table(['Date','Notes','Follow-up'],visits,[lambda r:self.date(r['date']),'notes',lambda r:self.date(r['followup'])]); l.addWidget(vt)
 
     def new_visit(self,pid):
         self.svc.allowed(clinical=True)
         v=self.form('New visit',[('doctor','Doctor','line',self.s.setting('display_dari' if i18n.LANG=='fa_AF' else 'display_english','داکتر فرشاد فرامرز' if i18n.LANG=='fa_AF' else 'Dr. Farshad Faramarz')),('date','Date','date',today()),('notes','Notes','text',''),('followup','Follow-up','date_optional','')])
         if v:
-            self.svc.visit(pid,**v); self.patient_detail(pid)
+            self.svc.visit(pid,**v); self.patient_detail(pid,1)
 
-    def add_treatment(self,tooth=''):
+    def add_treatment(self,tooth='',visit_id=None):
         self.svc.allowed(clinical=True)
-        vid=self.visit_choice.currentData()
+        vid=visit_id or self.visit_choice.currentData()
         if not vid: raise ValueError('Choose a record first')
         catalogue=self.s.rows('SELECT * FROM catalogue ORDER BY name')
         v=self.form('Add treatment',[('procedure','Procedure',[(r['name'],r['name']) for r in catalogue],catalogue[0]['name']),('price','Price','money','0.00'),('tooth','Tooth',['']+[str(n) for row in ADULT+CHILD for n in row],tooth),('condition','Condition','line',''),('status','Status',['planned','completed'],'planned'),('notes','Notes','text','')])
         if v:
-            self.svc.treatment(vid,price=money(v.pop('price')),**v); self.patient_detail(self.pid)
+            self.svc.treatment(vid,price=money(v.pop('price')),**v); self.patient_detail(self.pid,1)
 
     def complete_treatment(self):
-        t=self.treatment_table.selected(); self.svc.complete(t['id']); self.patient_detail(self.pid)
+        t=self.treatment_table.selected(); self.svc.complete(t['id']); self.patient_detail(self.pid,1)
 
-    def issue_invoice(self):
-        vid=self.visit_choice.currentData()
+    def issue_invoice(self,visit_id=None):
+        vid=visit_id or self.visit_choice.currentData()
         if not vid: raise ValueError('Choose a record first')
         v=self.form('Issue invoice',[('discount','Discount','money','0.00')])
         if v:
-            self.svc.invoice(vid,money(v['discount'])); self.patient_detail(self.pid,1)
+            self.svc.invoice(vid,money(v['discount'])); self.patient_detail(self.pid,3)
 
     def billing_tab(self,l,p):
         invoices=self.s.rows('SELECT * FROM invoices WHERE patient_id=? ORDER BY id DESC',(p['id'],))
@@ -320,7 +382,7 @@ class Window(QMainWindow):
     def billing_invoice(self):
         visits=self.s.rows("SELECT * FROM visits WHERE patient_id=? ORDER BY id DESC",(self.pid,))
         v=self.form('Issue invoice',[('visit','New visit',[(r['id'],f"V-{r['id']} · {self.date(r['date'])}") for r in visits],visits[0]['id'] if visits else None),('discount','Discount','money','0.00')])
-        if v and v['visit']:self.svc.invoice(v['visit'],money(v['discount']));self.patient_detail(self.pid,1)
+        if v and v['visit']:self.svc.invoice(v['visit'],money(v['discount']));self.patient_detail(self.pid,3)
 
     def treatment_details(self,r):
         self.svc.allowed(clinical=True)
@@ -334,11 +396,11 @@ class Window(QMainWindow):
         v=self.form('Refund' if refund else 'Record payment',[('amount','Amount','money',amount_text((inv['paid'] if refund else inv['balance']))),('method','Method',['Cash','Other'],'Cash'),('reason','Reason','line','')])
         if v:
             amount=money(v.pop('amount')); receipt=self.svc.payment(inv['id'],-amount if refund else amount,**v)
-            self.patient_detail(self.pid,1); PrintDialog(invoice_html(self.svc,inv['id'],receipt),self).exec()
+            self.patient_detail(self.pid,3); PrintDialog(invoice_html(self.svc,inv['id'],receipt),self).exec()
 
     def void(self):
         inv=self.invoice_table.selected(); v=self.form('Void invoice',[('reason','Reason','text','')])
-        if v: self.svc.void_invoice(inv['id'],v['reason']); self.patient_detail(self.pid,1)
+        if v: self.svc.void_invoice(inv['id'],v['reason']); self.patient_detail(self.pid,3)
 
     def print_invoice(self): PrintDialog(invoice_html(self.svc,self.invoice_table.selected()['id']),self).exec()
     def print_receipt(self):
@@ -351,11 +413,11 @@ class Window(QMainWindow):
         def add():
             self.svc.allowed(clinical=bool(pid),admin=not pid)
             path,_=QFileDialog.getOpenFileName(self,tr('Add document'))
-            if path:self.attach_file(path,pid,lambda _:self.patient_detail(pid,3) if pid else self.profile())
+            if path:self.attach_file(path,pid,lambda _:self.patient_detail(pid,4) if pid else self.profile())
         def open_doc():
             self.svc.allowed(clinical=bool(pid),admin=not pid)
             r=table.selected(); QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.s.root/'attachments'/r['stored'])))
-        self.actions(l,[('Add document',add,True),('Open document',open_doc)])
+        self.actions(l,[('Add document',add,True),('Open document',open_doc),('Remove',lambda:self.remove_saved_document(table,lambda:self.patient_detail(pid,4) if pid else self.profile()))])
 
     def prescriptions_tab(self,l,p):
         rows=self.s.rows('SELECT * FROM prescriptions WHERE patient_id=? ORDER BY id DESC',(p['id'],))
@@ -364,7 +426,7 @@ class Window(QMainWindow):
             self.svc.allowed(clinical=True)
             v=self.form('Write prescription',[('content','Prescription','text',''),('aftercare','Aftercare instructions','text','')])
             if v:
-                self.svc.add_record('prescriptions',dict(patient_id=p['id'],date=today(),**v),clinical=True); self.patient_detail(p['id'],4)
+                self.svc.add_record('prescriptions',dict(patient_id=p['id'],date=today(),**v),clinical=True); self.patient_detail(p['id'],5)
         def print_rx():
             self.svc.allowed(clinical=True); r=table.selected()
             PrintDialog(document_html(self.svc,'Prescription',p,[(tr('Date'),self.date(r['date'])),(tr('Prescription'),r['content']),(tr('Aftercare instructions'),r['aftercare'])]),self).exec()
@@ -401,7 +463,7 @@ class Window(QMainWindow):
             r=table.selected(); v=self.form('Change status',[('status','Status',['scheduled','arrived','in treatment','completed','cancelled','missed'],r['status'])])
             if v: self.svc.status(r['id'],v['status']); self.appointments()
         def visit(): self.new_visit(table.selected()['patient_id'])
-        self.actions(layout,[('Change status',change),('New visit',visit),('Record payment',lambda:self.patient_detail(table.selected()['patient_id'],1))]); layout.addStretch()
+        self.actions(layout,[('Change status',change),('New visit',visit),('Record payment',lambda:self.patient_detail(table.selected()['patient_id'],3))]); layout.addStretch()
 
     def add_appointment(self,walkin=False):
         pid=self.choose_patient('Walk-in' if walkin else 'Add appointment')
@@ -545,14 +607,79 @@ class Window(QMainWindow):
         html='<html dir="'+('rtl' if i18n.LANG=='fa_AF' else 'ltr')+'"><body style="font-family:Noto Sans Arabic"><h1>'+escape(self.s.setting('clinic_name','Faramarz Dental Clinic'))+'</h1><h2>'+tr('Reports')+'</h2><p>'+self.date(getattr(self,'report_start',today()[:8]+'01'))+' — '+self.date(getattr(self,'report_end',today()))+'</p><table>'+''.join('<tr><td>'+escape(r['metric'])+'</td><td>'+afn(r['amount'])+'</td></tr>' for r in self.report_rows)+'</table><p>'+tr('Cash surplus excludes unpaid liabilities and is not accounting profit.')+'</p></body></html>'
         PrintDialog(html,self).exec()
 
+    def image_card(self,layout,slot,title):
+        card=Card(title);stored=self.s.setting(slot);row=QHBoxLayout();preview=QLabel();preview.setFixedSize(94,94);preview.setAlignment(Qt.AlignCenter)
+        if stored:
+            pix=QPixmap(str(self.s.root/'attachments'/stored));preview.setPixmap(pix.scaled(88,88,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        elif slot=='clinic_logo':preview.setPixmap(QIcon(str(self.assets/'clinic.svg')).pixmap(70,70))
+        else:
+            preview.setText('FF' if slot=='profile_photo' else '◇');preview.setObjectName('avatar')
+        row.addWidget(preview);description=label('Custom image' if stored else ('Default avatar' if slot=='profile_photo' else 'Plain background' if slot=='clinic_background' else 'Default clinic mark' if slot=='clinic_logo' else 'No photograph'),'subtitle');row.addWidget(description,1);card.content.addLayout(row)
+        buttons=QGridLayout()
+        def refresh():self.patient_detail(int(slot.removeprefix('patient_photo_')),4) if slot.startswith('patient_photo_') else self.image_settings()
+        def upload():
+            self.svc.image_permission(slot);path,_=QFileDialog.getOpenFileName(self,tr('Choose image'),'','Images (*.png *.jpg *.jpeg *.webp)')
+            if path:
+                from .service import prepare_attachment
+                def saved(records):self.svc.replace_image(slot,records);refresh()
+                self.background(lambda:prepare_attachment(self.s.root,path,True),saved)
+        def remove():
+            if self.confirm('Remove this custom image? Your original file will be kept.'):
+                self.svc.remove_image(slot);refresh()
+        def show():
+            if stored:self.preview_image(stored,title)
+            else:
+                d=QDialog(self);d.setWindowTitle(tr('Preview'));l=QVBoxLayout(d);l.addWidget(label(description.text()));l.addWidget(button('Close',d.accept));d.exec()
+        for index,(text,fn) in enumerate([('Replace' if stored else 'Add',upload),('Remove',remove),('Preview',show),('Restore default',remove)]):
+            b=self.act(text,fn,index==0);b.setEnabled(bool(stored) or text in ('Add','Preview'));buttons.addWidget(b,index//2,index%2)
+        card.content.addLayout(buttons)
+        if layout is not None:layout.addWidget(card)
+        return card
+
+    def preview_image(self,stored,title='Preview'):
+        d=QDialog(self);d.setWindowTitle(tr(title));d.resize(720,530);l=QVBoxLayout(d);image=QLabel();image.setAlignment(Qt.AlignCenter);image.setPixmap(QPixmap(str(self.s.root/'attachments'/stored)).scaled(650,430,Qt.KeepAspectRatio,Qt.SmoothTransformation));l.addWidget(image,1);l.addWidget(button('Close',d.accept));d.exec()
+
+    def image_settings(self):
+        self.svc.allowed(admin=True);self.current='images';layout=self.page('Images & appearance','Make the clinic feel like yours.')
+        self.actions(layout,[('Clinic profile',self.profile),('Add gallery image',self.add_gallery_image,True)])
+        grid=QGridLayout();grid.setSpacing(16)
+        for i,(slot,title) in enumerate([('profile_photo','Profile photograph'),('clinic_logo','Clinic logo'),('clinic_background','Clinic background')]):grid.addWidget(self.image_card(None,slot,title),i//2,i%2)
+        overlay=Card('Background opacity','A soft overlay keeps text readable.');overlay.content.addWidget(label(str(self.s.setting('background_opacity','15'))+'%','metric'))
+        def opacity():
+            v=self.form('Background opacity',[('opacity','Opacity (0–30%)','int',int(self.s.setting('background_opacity','15')))])
+            if v:
+                if not 0<=v['opacity']<=30:raise ValueError('Choose an opacity between 0 and 30')
+                with self.svc.action('background opacity changed','',admin=True):self.s.set_setting('background_opacity',v['opacity'])
+                self.image_settings()
+        overlay.content.addWidget(self.act('Adjust overlay',opacity));grid.addWidget(overlay,1,1);layout.addLayout(grid)
+        gallery=self.s.rows("SELECT ia.slot,a.stored,a.name FROM image_assets ia JOIN attachments a ON a.id=ia.preview_id WHERE ia.slot LIKE 'gallery_%' ORDER BY ia.slot")
+        layout.addWidget(label('Profile gallery','brand'));gallery_grid=QGridLayout()
+        for index,row in enumerate(gallery):gallery_grid.addWidget(self.image_card(None,row['slot'],row['name'].replace(' (preview)','')),index//2,index%2)
+        if not gallery:layout.addWidget(label('No gallery images yet. Add your own clinic photographs.','subtitle'))
+        layout.addLayout(gallery_grid)
+        # Previous uploads remain documents until deliberately removed, never guessed away.
+        legacy=self.s.rows("SELECT * FROM attachments WHERE scope='profile' AND image_owned=0 AND (lower(stored) LIKE '%.png' OR lower(stored) LIKE '%.jpg' OR lower(stored) LIKE '%.jpeg' OR lower(stored) LIKE '%.webp')")
+        if legacy:
+            layout.addWidget(label('Other saved images','brand'));table=self.table(layout,['Name'],legacy,['name'])
+            self.actions(layout,[('Preview',lambda:self.preview_image(table.selected()['stored'])),('Remove',lambda:self.remove_saved_document(table,self.image_settings))])
+        layout.addStretch()
+
+    def add_gallery_image(self):
+        import uuid
+        slot='gallery_'+uuid.uuid4().hex
+        path,_=QFileDialog.getOpenFileName(self,tr('Choose image'),'','Images (*.png *.jpg *.jpeg *.webp)')
+        if path:
+            from .service import prepare_attachment
+            def saved(records):self.svc.replace_image(slot,records);self.image_settings()
+            self.background(lambda:prepare_attachment(self.s.root,path,True),saved)
+
+    def remove_saved_document(self,table,refresh):
+        row=table.selected()
+        if self.confirm('Remove this managed document? Your original file will be kept.'):
+            self.svc.remove_attachment(row['id']);refresh()
+
     def profile(self):
         layout=self.page('Clinic profile');self.svc.allowed(admin=True)
-        photo=self.s.setting('profile_photo')
-        if photo and (self.s.root/'attachments'/photo).exists():
-            image=QLabel();image.setPixmap(QPixmap(str(self.s.root/'attachments'/photo)).scaled(140,140,Qt.KeepAspectRatio,Qt.SmoothTransformation));layout.addWidget(image)
-        background=self.s.setting('clinic_background')
-        if background and (self.s.root/'attachments'/background).exists():
-            image=QLabel();image.setPixmap(QPixmap(str(self.s.root/'attachments'/background)).scaled(360,120,Qt.KeepAspectRatio,Qt.SmoothTransformation));layout.addWidget(image)
         fields=[('display_english','Display name (English)','line','Dr. Farshad Faramarz'),('display_dari','Display name (Dari)','line','داکتر فرشاد فرامرز'),('clinic_name','Clinic name','line','Faramarz Dental Clinic'),('clinic_address','Clinic address','line','Khair Khana, District 11, Kabul, Afghanistan'),('clinic_phone','Phone','phone',''),('biography','Biography','text',''),('education','Education & qualifications','text',''),('experience','Experience','text',''),('specialties','Specialties','text',''),('hours','Working hours','text','')]
         def edit():
             v=self.form('Clinic profile',fields,{k:self.s.setting(k,default) for k,_,_,default in fields})
@@ -560,11 +687,7 @@ class Window(QMainWindow):
                 with self.svc.action('clinic profile edited','',admin=True) as db:
                     db.executemany('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',list(v.items()))
                 self.profile()
-        def image(key):
-            path,_=QFileDialog.getOpenFileName(self,tr('Choose image'),'','Images (*.png *.jpg *.jpeg)')
-            if path:
-                self.attach_file(path,None,lambda meta:(self.s.set_setting(key,meta[-1]['stored']),self.profile()),True)
-        self.actions(layout,[('Clinic profile',edit,True),('Profile photograph',lambda:image('profile_photo')),('Clinic logo',lambda:image('clinic_logo')),('Clinic background',lambda:image('clinic_background'))])
+        self.actions(layout,[('Edit profile',edit,True),('Images & appearance',self.image_settings)])
         for key,title,_,default in fields:
             layout.addWidget(label(title,'brand'));layout.addWidget(label(self.s.setting(key,default) or 'No information supplied'))
         layout.addWidget(label('Profile documents & images','brand'));self.documents_tab(layout)
@@ -573,7 +696,7 @@ class Window(QMainWindow):
         self.svc.allowed(admin=True);layout=self.page('Settings')
         layout.addWidget(label('Dari wording is provisional; please review with the clinic.','subtitle'))
         def display():
-            v=self.form('Settings',[('theme','Theme',[('light','Light'),('dark','Dark'),('system','System')],self.s.setting('theme','system')),('calendar','Calendar',[('gregorian','Gregorian'),('solar','Solar Hijri')],self.s.setting('calendar','gregorian'))])
+            v=self.form('Settings',[('theme','Theme',[('light','Light'),('dark','Dark'),('system','System')],self.s.setting('theme','system')),('calendar','Calendar',[('gregorian','Gregorian'),('solar','Solar Hijri')],self.s.setting('calendar','gregorian')),('reduced_motion','Reduce motion','bool',self.s.setting('reduced_motion')=='True')])
             if v:
                 for k,value in v.items():self.s.set_setting(k,value)
                 self.apply_theme();self.settings()
@@ -726,7 +849,7 @@ def authenticate(service,parent=None):
             attempts[0]+=1;submit_button.setEnabled(False);QTimer.singleShot(min(30000,attempts[0]*1000),lambda:submit_button.setEnabled(True))
     submit_button=button('Create administrator' if first else 'Unlock',submit,True);submit_button.setObjectName('unlock');outer.addWidget(submit_button);password.returnPressed.connect(submit_button.click)
     def change_lang():
-        service.s.set_setting('language',language.currentData());i18n.LANG=language.currentData();d.done(2)
+        service.s.set_setting('language',language.currentData());i18n.LANG=language.currentData();apply_app_theme(service.s);d.done(2)
     language.currentIndexChanged.connect(change_lang)
     d.setLayoutDirection(Qt.RightToLeft if i18n.LANG=='fa_AF' else Qt.LeftToRight)
     result=d.exec()

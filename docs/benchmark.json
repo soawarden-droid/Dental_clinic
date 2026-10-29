@@ -7,24 +7,24 @@
   "queries_each": 100,
   "search": {
     "Synthetic patient 099": {
-      "median_ms": 9.136,
-      "p95_ms": 21.545,
-      "max_ms": 35.793
+      "median_ms": 8.89,
+      "p95_ms": 11.513,
+      "max_ms": 13.672
     },
     "+937000099": {
-      "median_ms": 6.832,
-      "p95_ms": 12.751,
-      "max_ms": 15.44
+      "median_ms": 8.852,
+      "p95_ms": 11.618,
+      "max_ms": 18.463
     },
     "P-009999": {
-      "median_ms": 5.003,
-      "p95_ms": 8.552,
-      "max_ms": 9.948
+      "median_ms": 8.199,
+      "p95_ms": 11.288,
+      "max_ms": 17.188
     },
     "not found": {
-      "median_ms": 5.123,
-      "p95_ms": 8.921,
-      "max_ms": 13.406
+      "median_ms": 7.9,
+      "p95_ms": 12.861,
+      "max_ms": 14.563
     }
   },
   "limitations": "Warm queries in a temporary profile on this development host; not a clinic laptop benchmark."

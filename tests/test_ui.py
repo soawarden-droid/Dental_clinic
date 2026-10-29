@@ -39,7 +39,7 @@ def fill_next(app,values):
 def test_real_dialog_patient_to_receipt(app,tmp_path,monkeypatch):
     svc=Service(Store(tmp_path/'clinic'));svc.register('doctor','a-long-test-password');svc.login('doctor','a-long-test-password')
     w=Window(svc,Path('assets'));w.show();app.processEvents()
-    fill_next(app,dict(name='Fictional · آزمایش مریض',estimated_age='8',allergies='Fictional alert'))
+    fill_next(app,dict(name='Fictional · آزمایش مریض',phone='0701234567',estimated_age='8',allergies='Fictional alert'))
     w.new_patient();assert w.pid==1
     fill_next(app,dict(notes='Fictional visit'))
     w.new_visit(1)
@@ -74,12 +74,13 @@ def test_real_dialog_patient_to_receipt(app,tmp_path,monkeypatch):
 
 def test_receptionist_clinical_pages_hidden(app,tmp_path):
     svc=Service(Store(tmp_path/'clinic'));svc.register('doctor','a-long-test-password');svc.login('doctor','a-long-test-password')
-    pid=svc.save_patient(dict(name='Fictional patient',history='Private clinical notes'))
+    pid=svc.save_patient(dict(name='Fictional patient',phone='0701234567',history='Private clinical notes'))
     svc.register('reception','reception-test-password','receptionist');svc.login('reception','reception-test-password')
     w=Window(svc,Path('assets'));w.patient_detail(pid)
     from PySide6.QtWidgets import QTabWidget
     tabs=w.pages.currentWidget().findChild(QTabWidget)
-    assert tabs.count()==1
+    assert tabs.count()==2
+    assert all('Private clinical notes' not in label.text() for label in tabs.findChildren(__import__('PySide6.QtWidgets',fromlist=['QLabel']).QLabel))
     w.close()
 
 
@@ -89,7 +90,7 @@ def test_background_attachment_backup_and_restore(app,tmp_path,monkeypatch):
     from PySide6.QtWidgets import QFileDialog
     from time import monotonic
     import clinic.ui as ui
-    svc=Service(Store(tmp_path/'clinic'));svc.register('doctor','a-long-test-password');svc.login('doctor','a-long-test-password');pid=svc.save_patient(dict(name='Fictional patient'))
+    svc=Service(Store(tmp_path/'clinic'));svc.register('doctor','a-long-test-password');svc.login('doctor','a-long-test-password');pid=svc.save_patient(dict(name='Fictional patient',phone='0701234567'))
     w=Window(svc,Path('assets'));errors=[];w.error=errors.append
     photo=tmp_path/'photo.png';image=QImage(2000,1500,QImage.Format_RGB32);image.fill(QColor('#087f80'));assert image.save(str(photo))
     results=[];w.attach_file(photo,pid,results.append,True)
@@ -102,7 +103,7 @@ def test_background_attachment_backup_and_restore(app,tmp_path,monkeypatch):
     assert len(svc.s.rows('SELECT * FROM attachments'))==2
     w.s.set_setting('backup_folder',str(tmp_path/'usb'));w.backup();wait_jobs()
     backup=next((tmp_path/'usb').glob('*.fdbackup'))
-    svc.save_patient(dict(name='After backup patient'))
+    svc.save_patient(dict(name='After backup patient',phone='0701234568'))
     monkeypatch.setattr(QFileDialog,'getOpenFileName',lambda *a,**k:(str(backup),''));w.confirm=lambda _:True
     def login_restored(service,parent=None):service.login('doctor','a-long-test-password');return True
     monkeypatch.setattr(ui,'authenticate',login_restored)
@@ -140,3 +141,59 @@ def test_first_account_in_dari(app,tmp_path):
     assert authenticate(svc)
     assert svc.user['role']=='admin'
     svc.s.db.close();i18n.LANG='en'
+
+
+def test_minimal_registration_form_inline_errors_and_null_printing(app,tmp_path):
+    from clinic.ui import PATIENT_FIELDS
+    from clinic.printing import document_html
+    from clinic import i18n
+    svc=Service(Store(tmp_path/'profile'));svc.register('doctor','a-long-test-password');svc.login('doctor','a-long-test-password');w=Window(svc,'assets')
+    d=Form('New patient',PATIENT_FIELDS,w);d.show();app.processEvents()
+    assert d.additional.isHidden()
+    d.validate();assert d.result_values is None and d.field_errors['name'].text()
+    d.fields['name'][0].setText('  Minimal patient  ');d.validate();assert d.result_values is None and d.field_errors['phone'].text()
+    d.fields['phone'][0].setText(' 070 123 4567 ');d.validate()
+    pid=svc.save_patient(d.result_values);p=svc.s.one('SELECT * FROM patients WHERE id=?',(pid,))
+    assert all(p[k] is None for k in ('father','address','dob','estimated_age','gender','email','history','allergies','medications','alerts','emergency','consent'))
+    html=document_html(svc,'Patient',p,[('Birth date',p['dob']),('Address',p['address'])])
+    assert 'None' not in html and '>null<' not in html and 'Minimal patient' in html
+    output=tmp_path/'minimal-patient.pdf';dialog=PrintDialog(html,w);printer=dialog.printer();printer.setOutputFormat(QPrinter.PdfFormat);printer.setOutputFileName(str(output));dialog.document.print_(printer)
+    assert output.read_bytes().startswith(b'%PDF')
+    d2=Form('Edit patient',PATIENT_FIELDS,w,p);assert d2.fields['dob'][0].text()=='' and d2.fields['gender'][0].currentData() is None
+    d2.fields['address'][0].setText('');svc.save_patient(d2.values(),pid);w.patient_detail(pid);w.close()
+
+
+def test_charts_empty_data_and_reduced_motion(app,tmp_path,monkeypatch):
+    from clinic.components import Chart
+    from clinic.theme import motion_enabled
+    from PySide6.QtTest import QTest
+    import clinic.theme as theme
+    svc=Service(Store(tmp_path/'profile'));svc.register('doctor','a-long-test-password');svc.login('doctor','a-long-test-password')
+    svc.s.set_setting('reduced_motion',True);assert not motion_enabled(svc.s)
+    data=svc.dashboard(7)
+    for kind,rows in [('trend',data['trend']),('donut',data['distribution']),('status',data['statuses'])]:
+        chart=Chart(kind,rows,motion_enabled(svc.s),has_records=False);chart.resize(400,200);chart.show();app.processEvents();assert chart.animation is None;assert not chart.grab().isNull();chart.close()
+    # Real zero/negative collections render without inventing a positive baseline.
+    chart=Chart('trend',[{'date':'2026-10-27','amount':100},{'date':'2026-10-28','amount':-50}],False);chart.resize(400,200);chart.show();app.processEvents();assert not chart.grab().isNull();chart.close()
+    svc.s.set_setting('reduced_motion',False);monkeypatch.setattr(theme,'system_reduced_motion',lambda:True);assert not motion_enabled(svc.s)
+    svc.s.db.close()
+
+
+def test_real_image_controls_upload_remove_and_restart(app,tmp_path,monkeypatch):
+    from PySide6.QtGui import QImage,QColor
+    from PySide6.QtWidgets import QFileDialog,QPushButton
+    from PySide6.QtTest import QTest
+    from time import monotonic
+    from clinic.i18n import tr
+    svc=Service(Store(tmp_path/'profile'));svc.register('doctor','a-long-test-password');svc.login('doctor','a-long-test-password')
+    original=tmp_path/'original-doctor.png';image=QImage(300,300,QImage.Format_RGB32);image.fill(QColor('#c4afe9'));assert image.save(str(original));original_bytes=original.read_bytes()
+    w=Window(svc,'assets');w.show();w.image_settings();w.confirm=lambda _:True;errors=[];w.error=errors.append
+    monkeypatch.setattr(QFileDialog,'getOpenFileName',lambda *a,**k:(str(original),''))
+    def click(text):next(b for b in w.pages.currentWidget().findChildren(QPushButton) if b.text()==tr(text)).click()
+    click('Add');deadline=monotonic()+15
+    while w.jobs and monotonic()<deadline:QTest.qWait(20)
+    assert not errors and svc.s.setting('profile_photo')
+    stored=svc.s.setting('profile_photo');assert (svc.s.root/'attachments'/stored).exists()
+    click('Remove');assert svc.s.setting('profile_photo')==''
+    assert original.read_bytes()==original_bytes
+    root=svc.s.root;w.close();reopened=Store(root);reopened.migrate();assert reopened.setting('profile_photo')=='';assert reopened.rows('SELECT * FROM image_assets')==[];reopened.db.close()

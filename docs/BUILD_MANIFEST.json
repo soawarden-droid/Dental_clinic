@@ -1,10 +1,13 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "target": "Ubuntu 24.04 amd64",
-  "package": "faramarz-dental_0.1.0_amd64.deb",
-  "package_bytes": 50759548,
-  "package_sha256": "6ac6959d8b7b5a34046cd13708f1bda46cd0ed871c0eb774f74d9b32afa4fb4a",
-  "executable_sha256": "f04a065e9cf8ba6b9146fc1bc28a7fee39223b7b5bfd5ec5a72ce98948d33c06",
-  "automated_tests": 23,
-  "offline_packaged_acceptance": "passed"
+  "package": "faramarz-dental_0.2.0_amd64.deb",
+  "package_bytes": 50789024,
+  "package_sha256": "45d1fe11df24c45da4fec364d3d88f132a9bb8537e810924cfa9c4c0b265e5ee",
+  "executable_sha256": "42808b99fe71dc109657ca79d12adf247dc599bd27e8797903510c79724df7b4",
+  "automated_tests": 32,
+  "offline_packaged_acceptance": "passed",
+  "scaled_packaged_acceptance": "passed at 125%",
+  "schema_version": 4,
+  "windows": "Workflow prepared; no Windows build or execution claimed"
 }

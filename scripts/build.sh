@@ -21,7 +21,7 @@ Terminal=false
 DESKTOP
 cat > "$stage/DEBIAN/control" <<'CONTROL'
 Package: faramarz-dental
-Version: 0.1.0
+Version: 0.2.0
 Architecture: amd64
 Maintainer: Faramarz Dental Clinic
 Depends: libc6 (>= 2.39), libgl1, libegl1, libxkbcommon0, libxkbcommon-x11-0, libxcb-cursor0, libxcb-icccm4, libxcb-keysyms1, libxcb-shape0, libxcb-xinerama0, libxcb-randr0, libxcb-render-util0, libxcb-image0, libfontconfig1, libdbus-1-3
@@ -29,4 +29,4 @@ Description: Offline dental records, appointments and billing
  Native desktop application with embedded SQLite and local backups.
 CONTROL
 chmod -R go-w "$stage"
-dpkg-deb --root-owner-group -Zxz -z3 --threads-max=2 --build "$stage" dist/faramarz-dental_0.1.0_amd64.deb
+dpkg-deb --root-owner-group -Zxz -z3 --threads-max=2 --build "$stage" dist/faramarz-dental_0.2.0_amd64.deb

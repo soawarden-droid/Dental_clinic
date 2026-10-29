@@ -15,7 +15,7 @@ for f in Path('assets').glob('*.ttf'):QFontDatabase.addApplicationFont(str(f))
 output=Path('docs/examples');output.mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory() as tmp:
     service=Service(Store(tmp));service.register('sample','Sample-documents-only');service.login('sample','Sample-documents-only')
-    pid=service.save_patient({'name':'نمونه خیالی — مریم احمدی','phone':'','estimated_age':'25'})
+    pid=service.save_patient({'name':'نمونه خیالی — مریم احمدی','phone':'+93700000000','estimated_age':'25'})
     vid=service.visit(pid,'Dr. Farshad Faramarz');service.treatment(vid,'Filling',250000,'26',status='completed');iid=service.invoice(vid);rid=service.payment(iid,100000,'Cash')
     for lang in ('en','fa_AF'):
         i18n.LANG=lang

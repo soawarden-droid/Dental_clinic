@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QFileDialog, QT
 from .i18n import tr
 from . import i18n
 from .domain import afn, display_date
+from .theme import LIGHT
 
 
 def document_html(service, title, patient, rows, totals=None, extra=''):
@@ -16,9 +17,12 @@ def document_html(service, title, patient, rows, totals=None, extra=''):
     name = s.setting('clinic_name','Faramarz Dental Clinic')
     doctor = s.setting('display_dari' if i18n.LANG=='fa_AF' else 'display_english','داکتر فرشاد فرامرز' if i18n.LANG=='fa_AF' else 'Dr. Farshad Faramarz')
     direction = 'rtl' if i18n.LANG=='fa_AF' else 'ltr'
-    def e(v): return escape(str(v)).replace('\n','<br>')
+    def e(v): return escape('—' if v is None or v=='' else str(v)).replace('\n','<br>')
+    # Explicit embedding keeps the leading + with Latin phone digits in Qt's RTL paragraphs.
+    def phone(v):return '&#8234;'+e(v)+'&#8236;'
     logo = s.setting('clinic_logo')
-    logo_html = ('<img width=64 height=64 src="'+(s.root/'attachments'/logo).as_uri()+'">') if logo else ''
+    logo_path=(s.root/'attachments'/logo) if logo else Path(__file__).resolve().parent.parent/'assets'/'clinic.svg'
+    logo_html='<img width=48 height=48 src="'+logo_path.as_uri()+'">'
     def row_html(a,b):
         value_dir='rtl' if any('\u0600'<=ch<='\u06ff' for ch in str(b)) else 'ltr'
         if direction=='rtl':
@@ -26,7 +30,7 @@ def document_html(service, title, patient, rows, totals=None, extra=''):
         return '<tr><td>'+e(a)+'</td><td align="right" dir="'+value_dir+'">'+e(b)+'</td></tr>'
     body = ''.join(row_html(a,b) for a,b in rows)
     total = '' if not totals else '<hr>'+''.join('<p>'+e(tr(k))+': <span dir="ltr">'+e(afn(v))+'</span></p>' for k,v in totals)
-    return f'''<html dir="{direction}"><head><meta charset="utf-8"><style>body{{font-family:'Noto Sans Arabic';font-size:11pt;color:#173b40}}h1{{font-size:23pt;color:#087f80}}td{{padding:9px;border-bottom:1px solid #d7e1df}}table{{width:100%}}small{{color:#526567}}</style></head><body>{logo_html}<h1>{e(name)}</h1><p>{e(doctor)}<br>{e(s.setting('clinic_address','Khair Khana, District 11, Kabul, Afghanistan'))}<br>{e(s.setting('clinic_phone',''))}</p><hr><h2>{e(tr(title))}</h2><p>{e(tr('Patient'))}: {e(patient['name'])} &nbsp; <span dir="ltr">P-{patient['id']:06}</span></p><table width="100%" dir="{direction}">{body}</table>{total}<p>{e(extra)}</p></body></html>'''
+    return f'''<html dir="{direction}"><head><meta charset="utf-8"><style>body{{font-family:'Noto Sans Arabic';font-size:11pt;color:{LIGHT.ink}}}h1{{font-size:23pt;color:{LIGHT.rose}}}td{{padding:9px;border-bottom:1px solid {LIGHT.border}}}table{{width:100%}}small{{color:{LIGHT.muted}}}</style></head><body>{logo_html}<h1>{e(name)}</h1><p>{e(doctor)}<br>{e(s.setting('clinic_address','Khair Khana, District 11, Kabul, Afghanistan'))}<br>{phone(s.setting('clinic_phone',''))}</p><hr><h2>{e(tr(title))}</h2><p>{e(tr('Patient'))}: {e(patient['name'])} &nbsp; <span dir="ltr">P-{patient['id']:06}</span><br>{e(tr('Phone'))}: <span dir="ltr">{phone(patient.get('phone'))}</span></p><table width="100%" dir="{direction}">{body}</table>{total}<p>{e(extra)}</p></body></html>'''
 
 
 def invoice_html(service, iid, payment_id=None):

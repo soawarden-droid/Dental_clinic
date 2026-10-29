@@ -39,7 +39,7 @@ def main():
     app=QApplication(sys.argv);app.setApplicationName('Faramarz Dental Clinic');app.setOrganizationName('FaramarzDental')
     assets=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'assets'
     for path in assets.glob('*.ttf'):QFontDatabase.addApplicationFont(str(path))
-    app.setFont(QFont('DejaVu Sans',10));app.setStyle('Fusion')
+    app.setFont(QFont('Noto Sans',10));app.setStyle('Fusion')
     lock=QLockFile(str(root.parent/(root.name+'.lock')))
     if not lock.tryLock(0):
         QMessageBox.information(None,'Faramarz Dental Clinic','This clinic profile is already open.');return 1
@@ -47,6 +47,8 @@ def main():
     try:service=Service(store)
     except Exception as e:QMessageBox.critical(None,'Faramarz Dental Clinic',str(e));return 1
     i18n.LANG=store.setting('language','en')
+    from clinic.theme import apply_app_theme
+    apply_app_theme(store)
     if args.verify:
         from clinic.verification import run
         return run(app,service,assets,args.verify,started)
@@ -71,11 +73,20 @@ def main():
     if args.capture:
         window.resize(1366,768)
         target=Path(args.capture);target.mkdir(parents=True,exist_ok=True)
-        states=[('en','light','overview-en-light.png',False),('en','dark','patient-en-dark.png',True),('fa_AF','light','patient-dari-light.png',True),('fa_AF','dark','overview-dari-dark.png',False)]
+        states=[('en','light','overview-en-light.png','dashboard'),('en','dark','patient-en-dark.png','patient'),('fa_AF','light','patient-dari-light.png','patient'),('fa_AF','dark','overview-dari-dark.png','dashboard'),('en','light','minimal-patient-form-en.png','form'),('fa_AF','dark','minimal-patient-form-dari-dark.png','form'),('en','light','image-settings-en.png','images'),('fa_AF','dark','image-settings-dari-dark.png','images')]
         def capture(index=0):
             if index==len(states):app.quit();return
-            lang,theme,name,patient=states[index];store.set_setting('language',lang);store.set_setting('theme',theme);window.current='Overview';window.build()
-            if patient:window.patient_detail(1)
+            lang,theme,name,kind=states[index];store.set_setting('language',lang);store.set_setting('theme',theme);window.current='Overview';window.build()
+            if kind=='patient':window.patient_detail(1)
+            elif kind=='images':window.image_settings()
+            if kind=='form':
+                from clinic.widgets import Form
+                from clinic.ui import PATIENT_FIELDS
+                dialog=Form('New patient',PATIENT_FIELDS,window)
+                dialog.fields['name'][0].setText('Fictional patient' if lang=='en' else 'مریض آزمایشی')
+                dialog.fields['phone'][0].setText('070 123 4567');dialog.dirty=False
+                def save_form():dialog.grab().save(str(target/name));dialog.accept()
+                QTimer.singleShot(500,save_form);dialog.exec();QTimer.singleShot(0,lambda:capture(index+1));return
             def save():window.grab().save(str(target/name));capture(index+1)
             QTimer.singleShot(500,save)
         QTimer.singleShot(500,capture)

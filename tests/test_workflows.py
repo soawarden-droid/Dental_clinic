@@ -88,7 +88,7 @@ def test_migration_restart_and_foreign_keys(svc):
     root=svc.s.root;svc.s.db.close();svc.s=Store(root);svc.s.migrate();svc.s.migrate()
     assert svc.s.one('SELECT name FROM patients WHERE id=?',(pid,))['name']=='Fictional Test Child'
     assert svc.s.db.execute('PRAGMA foreign_keys').fetchone()[0]==1
-    assert svc.s.db.execute('PRAGMA user_version').fetchone()[0]==2
+    assert svc.s.db.execute('PRAGMA user_version').fetchone()[0]==4
     with pytest.raises(sqlite3.IntegrityError):
         with svc.s.db:svc.s.db.execute('DELETE FROM patients WHERE id=?',(pid,))
 

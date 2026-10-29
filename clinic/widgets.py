@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QFormLayout,QLabel,QLineEdit,QTextEdit,QComboBox,QSpinBox,QCheckBox,QDialogButtonBox,QScrollArea,QWidget,QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QHeaderView,QMessageBox,QApplication)
+from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QFormLayout,QLabel,QLineEdit,QTextEdit,QComboBox,QSpinBox,QCheckBox,QDialogButtonBox,QScrollArea,QWidget,QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QHeaderView,QMessageBox,QApplication,QToolButton)
 from PySide6.QtCore import Qt, QTimer
 from .i18n import tr
 from .domain import parse_date,display_date,today,money,phone_normalize
@@ -23,12 +23,26 @@ class Form(QDialog):
     def __init__(self, title, fields, parent=None, initial=None):
         super().__init__(parent)
         self.setWindowTitle(tr(title)); self.resize(570, min(680,190+len(fields)*56,QApplication.primaryScreen().availableGeometry().height()-70))
-        self.fields = {}; self.dirty = False
+        self.fields = {}; self.field_errors={}; self.dirty = False
+        self.is_patient=title in ('New patient','Edit patient')
         self.solar = bool(parent and getattr(parent,'s',None) and parent.s.setting('calendar')=='solar')
         layout = QVBoxLayout(self)
         layout.addWidget(label(title,'title'))
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        body = QWidget(); form = QFormLayout(body); form.setSpacing(12)
+        body = QWidget(); sections=QVBoxLayout(body);sections.setContentsMargins(4,4,4,4);sections.setSpacing(16)
+        essential=QWidget();form=QFormLayout(essential);form.setSpacing(12)
+        if self.is_patient:sections.addWidget(label('Essential details','brand'))
+        sections.addWidget(essential)
+        self.additional=None
+        if self.is_patient:
+            self.more=QToolButton();self.more.setText(tr('Additional information'));self.more.setCheckable(True);self.more.setToolButtonStyle(Qt.ToolButtonTextBesideIcon);self.more.setArrowType(Qt.RightArrow)
+            sections.addWidget(self.more)
+            self.additional=QWidget();optional_form=QFormLayout(self.additional);optional_form.setSpacing(12);sections.addWidget(self.additional);self.additional.hide()
+            def toggle(checked):
+                self.additional.setVisible(checked);self.more.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+            self.more.toggled.connect(toggle)
+            self.resize(610,min(510,QApplication.primaryScreen().availableGeometry().height()-70))
+        sections.addStretch()
         initial = initial or {}
         for key, title, kind, default in fields:
             value = initial.get(key, default)
@@ -41,13 +55,13 @@ class Form(QDialog):
                 if idx>=0: w.setCurrentIndex(idx)
                 w.currentIndexChanged.connect(self.changed)
             elif kind=='text':
-                w = QTextEdit(); w.setPlainText(str(value)); w.setMaximumHeight(90); w.textChanged.connect(self.changed)
+                w = QTextEdit(); w.setPlainText('' if value is None else str(value)); w.setMaximumHeight(90); w.textChanged.connect(self.changed)
             elif kind=='int':
                 w = QSpinBox(); w.setRange(-100000000,100000000); w.setValue(int(value or 0)); w.valueChanged.connect(self.changed)
             elif kind=='bool':
                 w = QCheckBox(); w.setChecked(bool(value)); w.toggled.connect(self.changed)
             else:
-                w = QLineEdit(str(value))
+                w = QLineEdit('' if value is None else str(value))
                 if kind=='password': w.setEchoMode(QLineEdit.Password)
                 if kind in ('date','date_optional'):
                     if value and self.solar:
@@ -58,7 +72,14 @@ class Form(QDialog):
                     w.setLayoutDirection(Qt.LeftToRight)
                 if kind in ('money','phone','password'): w.setLayoutDirection(Qt.LeftToRight)
                 w.textChanged.connect(self.changed)
-            w.setAccessibleName(tr(title)); form.addRow(tr(title),w); self.fields[key]=(w,kind)
+            w.setAccessibleName(tr(title))
+            target=optional_form if self.is_patient and key not in ('name','phone') else form
+            if self.is_patient:
+                group=QWidget();group_layout=QVBoxLayout(group);group_layout.setContentsMargins(0,0,0,0);group_layout.setSpacing(3);group_layout.addWidget(w)
+                error_label=label('','error');error_label.hide();group_layout.addWidget(error_label);self.field_errors[key]=error_label
+                target.addRow(tr(title)+(' *' if key in ('name','phone') else ''),group)
+            else:target.addRow(tr(title),w)
+            self.fields[key]=(w,kind)
         scroll.setWidget(body); layout.addWidget(scroll)
         self.error = label(''); self.error.setObjectName('error'); layout.addWidget(self.error)
         bb = QDialogButtonBox(); bb.addButton(tr('Save'),QDialogButtonBox.AcceptRole); bb.addButton(tr('Cancel'),QDialogButtonBox.RejectRole)
@@ -69,6 +90,15 @@ class Form(QDialog):
 
     def values(self):
         result = {}
+        for error in self.field_errors.values():error.hide()
+        if self.is_patient:
+            for key,message in [('name','Full name is required'),('phone','Phone number is required')]:
+                w=self.fields[key][0]
+                if not w.text().strip():
+                    self.field_errors[key].setText(tr(message));self.field_errors[key].show();w.setFocus();raise ValueError(message)
+            try:phone_normalize(self.fields['phone'][0].text())
+            except ValueError as error:
+                self.field_errors['phone'].setText(tr(str(error)));self.field_errors['phone'].show();self.fields['phone'][0].setFocus();raise
         for key,(w,kind) in self.fields.items():
             if isinstance(w,QComboBox): value = w.currentData()
             elif isinstance(w,QTextEdit): value = w.toPlainText().strip()
@@ -111,9 +141,15 @@ class Table(QTableWidget):
         for r,row in enumerate(rows):
             for c,key in enumerate(keys):
                 value = key(row) if callable(key) else row.get(key,'')
-                item = QTableWidgetItem(tr(str(value)))
-                item.setToolTip(str(value))
+                text='—' if value is None or value=='' else tr(str(value))
+                item = QTableWidgetItem(text)
+                item.setToolTip(text)
                 self.setItem(r,c,item)
+                if headers[c]=='Status' and value:
+                    from .theme import colors
+                    p=colors();tone=p.mint if value in ('completed','arrived','returned') else p.danger if value in ('cancelled','missed','delayed') else p.lilac
+                    badge=QLabel(tr(str(value)));badge.setAlignment(Qt.AlignCenter);badge.setObjectName('statusBadge');badge.setStyleSheet('QLabel#statusBadge {color:'+tone+';background:'+p.soft+';border-radius:11px;padding:3px 7px;}')
+                    box=QWidget();bl=QHBoxLayout(box);bl.setContentsMargins(5,7,5,7);bl.addWidget(badge);self.setCellWidget(r,c,box)
         self.setSortingEnabled(False)
 
     def selected(self):

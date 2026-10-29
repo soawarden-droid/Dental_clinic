@@ -1,6 +1,7 @@
 {
-  "usable_seconds_in_process": 2.835,
+  "usable_seconds_in_process": 1.203,
   "checks": [
+    "Name-and-phone-only registration: omitted optional fields are SQL NULL",
     "Real account and patient \u2192 visit \u2192 treatment \u2192 invoice \u2192 partial payment \u2192 PDF dialogs",
     "All pages render in English/Dari and light/dark at 1366\u00d7768",
     "Dari PDF generated; printing leaves balance unchanged",

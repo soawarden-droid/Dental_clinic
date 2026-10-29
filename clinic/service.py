@@ -53,35 +53,49 @@ class Service:
         # Indexed exact ID and phone, prefix range for names. Escape LIKE wildcards.
         pattern = term.replace('\\','\\\\').replace('%','\\%').replace('_','\\_') + '%'
         number = term.upper().removeprefix('P-').lstrip('0') or '0'
-        return self.s.rows("SELECT * FROM patients WHERE archived=? AND (name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR id=?) ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?", (int(archived), pattern, pattern, number, limit, offset))
+        import re
+        phone_term=term.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789'))
+        phone_term=re.sub(r'[\s()\-.]','',phone_term)
+        if re.fullmatch(r'\+?\d+',phone_term or ' '):
+            if phone_term.startswith('00'):phone_term='+'+phone_term[2:]
+            elif phone_term.startswith('0'):phone_term='+93'+phone_term[1:]
+            elif phone_term.startswith('93'):phone_term='+'+phone_term
+            phone_pattern=phone_term+'%'
+        else:phone_pattern=pattern
+        return self.s.rows("SELECT * FROM patients WHERE archived=? AND (name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR id=?) ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?", (int(archived), pattern, phone_pattern, number, limit, offset))
 
     def save_patient(self, values, patient_id=None):
-        values = dict(values)
-        values['name'] = values.get('name','').strip()
-        if not values['name']:
-            raise ValueError('Full name is required')
-        values['phone'] = phone_normalize(values.get('phone',''))
-        if values.get('dob'):
+        self.allowed()
+        provided=dict(values)
+        old=self.s.one('SELECT * FROM patients WHERE id=?',(patient_id,)) if patient_id else None
+        if patient_id and not old:raise ValueError('Choose a record first')
+        values=dict(old or {});values.update(provided)
+        values['name']=(values.get('name') or '').strip()
+        if not values['name']:raise ValueError('Full name is required')
+        raw_phone=(values.get('phone') or '').strip()
+        # Legacy missing phones are preserved for unrelated section edits.
+        if not raw_phone and (not old or 'phone' in provided):raise ValueError('Phone number is required')
+        values['phone']=phone_normalize(raw_phone) if raw_phone else old['phone']
+        optional=['father','address','dob','estimated_age','gender','email','history','allergies','medications','alerts','emergency','consent']
+        for key in optional:
+            value=values.get(key)
+            values[key]=str(value).strip() or None if value is not None else None
+        if values['dob']:
             check_date(values['dob'])
-            if values['dob'] > today():
-                raise ValueError('Birth date cannot be in the future')
-        if values.get('estimated_age'):
-            if not values['estimated_age'].isdigit() or not 0 <= int(values['estimated_age']) <= 130:
+            if values['dob']>today():raise ValueError('Birth date cannot be in the future')
+        if values['estimated_age'] is not None:
+            if not values['estimated_age'].isdigit() or not 0<=int(values['estimated_age'])<=130:
                 raise ValueError('Estimated age must be between 0 and 130')
-        keys = ['name','father','phone','address','dob','estimated_age','history','allergies','medications','alerts','emergency','consent']
-        data = [values.get(k,'') for k in keys]
-        if patient_id and self.user and self.user['role'] != 'admin':
-            old = self.s.one('SELECT * FROM patients WHERE id=?', (patient_id,))
-            for key in ('history','allergies','medications','alerts','consent'):
-                if values.get(key,'') != old[key]:
-                    raise PermissionError('Administrator access required')
-        elif self.user and self.user['role'] != 'admin' and any(values.get(k) for k in ('history','allergies','medications','alerts','consent')):
+        protected=('history','allergies','medications','alerts','consent')
+        if self.user['role']!='admin' and any(values[k]!=(old.get(k) if old else None) for k in protected):
             raise PermissionError('Administrator access required')
-        with self.action('patient saved', patient_id or values['name']) as db:
+        keys=['name','phone']+optional
+        data=[values[k] for k in keys]
+        with self.action('patient saved',patient_id or values['name']) as db:
             if patient_id:
-                db.execute('UPDATE patients SET '+','.join(k+'=?' for k in keys)+' WHERE id=?', data+[patient_id])
+                db.execute('UPDATE patients SET '+','.join(k+'=?' for k in keys)+' WHERE id=?',data+[patient_id])
             else:
-                patient_id = db.execute('INSERT INTO patients('+','.join(keys)+',created) VALUES('+','.join('?' for _ in range(len(keys)+1))+')', data+[now()]).lastrowid
+                patient_id=db.execute('INSERT INTO patients('+','.join(keys)+',created) VALUES('+','.join('?' for _ in range(len(keys)+1))+')',data+[now()]).lastrowid
         return patient_id
 
     def duplicates(self, name, phone, exclude=0):
@@ -267,6 +281,92 @@ class Service:
     def record_attachment(self, meta, pid=None):
         with self.action('attachment added',meta['name'],clinical=pid is not None,admin=pid is None) as db:
             return db.execute('INSERT INTO attachments(patient_id,scope,name,stored,sha256) VALUES(?,?,?,?,?)', (pid,'patient' if pid else 'profile',meta['name'],meta['stored'],meta['sha256'])).lastrowid
+
+
+    def balances(self, patient_id=None):
+        self.allowed()
+        query='''SELECT i.*,p.name,p.phone,
+          CASE WHEN i.void THEN 0 ELSE COALESCE(items.subtotal,0)-i.discount END total,
+          COALESCE(pay.paid,0) paid,
+          CASE WHEN i.void THEN 0 ELSE COALESCE(items.subtotal,0)-i.discount END-COALESCE(pay.paid,0) balance
+          FROM invoices i JOIN patients p ON p.id=i.patient_id
+          LEFT JOIN (SELECT invoice_id,SUM(amount) subtotal FROM invoice_items GROUP BY invoice_id) items ON items.invoice_id=i.id
+          LEFT JOIN (SELECT invoice_id,SUM(amount) paid FROM payments GROUP BY invoice_id) pay ON pay.invoice_id=i.id'''
+        return self.s.rows(query+(' WHERE i.patient_id=?' if patient_id else '')+' ORDER BY i.id DESC',(patient_id,) if patient_id else ())
+
+    def dashboard(self, days=30):
+        self.allowed()
+        if days not in (7,30,90):raise ValueError('Please check your entry')
+        from datetime import date
+        end=today();start=(date.fromisoformat(end)-timedelta(days=days-1)).isoformat()
+        next_week=(date.fromisoformat(end)+timedelta(days=7)).isoformat()
+        appointments=self.s.rows('SELECT a.*,p.name FROM appointments a JOIN patients p ON p.id=a.patient_id WHERE substr(a.starts,1,10)=? ORDER BY a.starts',(end,))
+        visits=self.s.rows('SELECT v.*,p.name FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.date=? ORDER BY v.id DESC',(end,))
+        upcoming=self.s.rows("SELECT a.*,p.name FROM appointments a JOIN patients p ON p.id=a.patient_id WHERE a.starts>=? AND substr(a.starts,1,10)<=? AND a.status IN ('scheduled','arrived','in treatment') ORDER BY a.starts",(now()[:16],next_week))
+        ledger=self.s.rows('SELECT pay.*,i.patient_id,p.name FROM payments pay JOIN invoices i ON i.id=pay.invoice_id JOIN patients p ON p.id=i.patient_id WHERE pay.date BETWEEN ? AND ? ORDER BY pay.date,pay.id',(start,end))
+        by_date={}
+        for row in ledger:by_date[row['date']]=by_date.get(row['date'],0)+row['amount']
+        trend=[{'date':(date.fromisoformat(start)+timedelta(days=n)).isoformat(),'amount':by_date.get((date.fromisoformat(start)+timedelta(days=n)).isoformat(),0)} for n in range(days)]
+        distribution=self.s.rows("SELECT t.procedure,COUNT(*) count FROM treatments t JOIN visits v ON v.id=t.visit_id WHERE v.date BETWEEN ? AND ? AND t.status='completed' GROUP BY t.procedure ORDER BY count DESC,t.procedure",(start,end))
+        statuses=self.s.rows('SELECT status,COUNT(*) count FROM appointments WHERE substr(starts,1,10) BETWEEN ? AND ? GROUP BY status ORDER BY count DESC,status',(start,end))
+        balances=[r for r in self.balances() if r['balance']>0]
+        low_stock=self.s.rows('SELECT m.*,COALESCE(SUM(s.quantity),0) quantity FROM materials m LEFT JOIN stock s ON s.material_id=m.id GROUP BY m.id HAVING quantity<=minimum ORDER BY m.name')
+        followups=self.s.rows('SELECT v.*,p.name FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.followup>=? ORDER BY v.followup,v.id LIMIT 8',(end,))
+        return dict(start=start,end=end,visits=visits,appointments=appointments,upcoming=upcoming,ledger=ledger,trend=trend,distribution=distribution,statuses=statuses,balances=balances,collected_today=sum(r['amount'] for r in ledger if r['date']==end),outstanding=sum(r['balance'] for r in balances),recent_patients=self.s.rows('SELECT * FROM patients WHERE archived=0 ORDER BY created DESC,id DESC LIMIT 6'),low_stock=low_stock,followups=followups)
+
+
+    def image_permission(self,slot):
+        import re
+        if slot in ('profile_photo','clinic_logo','clinic_background') or re.fullmatch(r'gallery_[a-f0-9]+',slot):self.allowed(admin=True);return None
+        match=re.fullmatch(r'patient_photo_([0-9]+)',slot)
+        if not match:raise ValueError('Unsupported image setting')
+        self.allowed(clinical=True)
+        pid=int(match.group(1))
+        if not self.s.one('SELECT id FROM patients WHERE id=?',(pid,)):raise ValueError('Choose a record first')
+        return pid
+
+    def replace_image(self,slot,records):
+        pid=self.image_permission(slot)
+        if not records:raise ValueError('Please check your entry')
+        old=self.s.one('SELECT * FROM image_assets WHERE slot=?',(slot,))
+        with self.action('image replaced',slot,clinical=pid is not None,admin=pid is None) as db:
+            ids=[]
+            for meta in records:
+                if Path(meta['stored']).name!=meta['stored']:raise ValueError('Invalid attachment path')
+                ids.append(db.execute('INSERT INTO attachments(patient_id,scope,name,stored,sha256,image_owned) VALUES(?,?,?,?,?,1)',(pid,'patient' if pid else 'profile',meta['name'],meta['stored'],meta['sha256'])).lastrowid)
+            db.execute('INSERT INTO image_assets VALUES(?,?,?) ON CONFLICT(slot) DO UPDATE SET original_id=excluded.original_id,preview_id=excluded.preview_id',(slot,ids[0],ids[-1]))
+            db.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(slot,records[-1]['stored']))
+        if old:self._collect_image_copies({old['original_id'],old['preview_id']})
+        return ids
+
+    def remove_image(self,slot):
+        pid=self.image_permission(slot)
+        old=self.s.one('SELECT * FROM image_assets WHERE slot=?',(slot,))
+        with self.action('image removed',slot,clinical=pid is not None,admin=pid is None) as db:
+            db.execute('DELETE FROM image_assets WHERE slot=?',(slot,));db.execute('DELETE FROM settings WHERE key=?',(slot,))
+        if old:self._collect_image_copies({old['original_id'],old['preview_id']})
+
+    def _collect_image_copies(self,ids):
+        for aid in ids:
+            row=self.s.one('SELECT * FROM attachments WHERE id=?',(aid,))
+            if not row or not row['image_owned']:continue
+            if self.s.one('SELECT slot FROM image_assets WHERE original_id=? OR preview_id=?',(aid,aid)):continue
+            if self.s.one('SELECT key FROM settings WHERE value=?',(row['stored'],)):continue
+            with self.s.db:self.s.db.execute('DELETE FROM attachments WHERE id=?',(aid,))
+            if Path(row['stored']).name==row['stored']:
+                try:(self.s.root/'attachments'/row['stored']).unlink(missing_ok=True)
+                except OSError:
+                    import logging
+                    logging.warning('An unused managed image could not yet be removed')
+
+    def remove_attachment(self,aid):
+        row=self.s.one('SELECT * FROM attachments WHERE id=?',(aid,))
+        if not row:raise ValueError('Choose a record first')
+        self.allowed(clinical=row['patient_id'] is not None,admin=row['patient_id'] is None)
+        if self.s.one('SELECT slot FROM image_assets WHERE original_id=? OR preview_id=?',(aid,aid)) or self.s.one('SELECT key FROM settings WHERE value=?',(row['stored'],)):
+            raise ValueError('This image is still in use. Remove its setting first.')
+        with self.action('attachment removed',aid,clinical=row['patient_id'] is not None,admin=row['patient_id'] is None) as db:db.execute('DELETE FROM attachments WHERE id=?',(aid,))
+        if Path(row['stored']).name==row['stored']:(self.s.root/'attachments'/row['stored']).unlink(missing_ok=True)
 
 
 def prepare_attachment(root, source, thumbnail=False):

@@ -81,12 +81,14 @@ def parse_date(value, solar=False):
 
 
 def phone_normalize(value):
-    value = value.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '01234567890123456789'))
+    value = (value or '').strip().translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '01234567890123456789'))
     n = re.sub(r'[\s()\-]', '', value)
     if n.startswith('00'):
         n = '+' + n[2:]
-    if re.fullmatch(r'0[27]\d{8}', n):
+    if re.fullmatch(r'0\d{9}', n):
         n = '+93' + n[1:]
+    if re.fullmatch(r'93\d{9}',n):n='+'+n
+    if re.fullmatch(r'\+930\d{9}',n):n='+93'+n[4:]
     if n and not re.fullmatch(r'\+?\d{7,15}', n):
         raise ValueError('Enter a valid phone number')
     return n

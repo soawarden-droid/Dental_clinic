@@ -1,4 +1,4 @@
-#define AppVersion "0.1.0"
+#define AppVersion "0.2.0"
 [Setup]
 AppId={{97D482A2-09A5-48C8-AF39-3212F094BEA1}
 AppName=Faramarz Dental Clinic
