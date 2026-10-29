@@ -4,17 +4,23 @@ A native offline dental clinic desktop application for Dr. Farshad Faramarz, Kha
 
 ## Install and use
 
-Ubuntu **24.04 amd64** is the build target. Open `dist/faramarz-dental_0.2.0_amd64.deb` with Ubuntu's package installer and install it, then launch **Faramarz Dental Clinic** from Applications. The package declares system runtime libraries. Python, Qt developer tools, Node, Flutter, a server, or an internet account are not needed to run the installed application. The application itself has no network dependency; OS dependencies should already be present or be supplied via Ubuntu packages for an entirely offline installation.
+Ubuntu **24.04 amd64** is the build target. Open `dist/faramarz-dental_0.3.0_amd64.deb` with Ubuntu's package installer and install it, then launch **Faramarz Dental Clinic** from Applications. The package declares system runtime libraries. Python, Qt developer tools, Node, Flutter, a server, or an internet account are not needed to run the installed application. The application itself has no network dependency; OS dependencies should already be present or be supplied via Ubuntu packages for an entirely offline installation.
 
 The first launch asks you to create your own local administrator. There are no shared credentials and no sample patients in the normal profile. Read the in-app Help → User guide, [English guide](docs/USER_GUIDE.md), or [Dari guide](docs/USER_GUIDE.fa_AF.md). Keep complete backups on a separate drive.
 
 For package installation from a developer terminal:
 
 ```bash
-sudo apt install ./dist/faramarz-dental_0.2.0_amd64.deb
+sudo apt install ./dist/faramarz-dental_0.3.0_amd64.deb
 ```
 
 Records are in the user's application data directory, separate from `/opt/faramarz-dental`. Package updates and removal do not delete those records. Local login restricts actions in the app; SQLite, attachments and backup archives are **not encrypted**. OS account protection and disk encryption provide protection at rest.
+
+## Daily fees and payments
+
+Open the patient → New visit → Add charge (consultation 500 AFN) → Add charge (treatment 2,000 AFN, or complete the doctor's treatment) → Issue invoice. The unpaid total is 2,500 AFN. Record payment 1,000 AFN: remaining 1,500 AFN. Reopen after a restart/later visit and record 1,500 AFN against the same invoice: paid, remaining zero. Statement lists both charges and both receipts. Saving a draft or issuing an invoice never invents a payment.
+
+Draft fees and unbilled treatments can be edited; finalized financial records use audited refund/void/reissue. A unique request key and a write transaction prevent duplicate retries or concurrent overpayment. Invoice totals, patient balances, reports and dashboard read one balance view. The login screen has explicit local-owner password recovery with a complete backup and audit entry.
 
 ## What works
 
@@ -37,7 +43,7 @@ Read [verification and limitations](docs/VERIFICATION.md) for evidence and bound
 
 Flutter was present, but Python 3.12 + Qt/PySide6 6.8.3 was selected for direct embedded SQLite, desktop text shaping/RTL, native printing, and a maintainable single-process application. This is a measured choice, not a claim that Qt is inherently fastest. PyInstaller bundles the runtime with replaceable shared Qt libraries. No web view, browser storage, HTTP listener or external database is used. All fonts and visual assets are bundled. Unused Qt PDF-reading, virtual keyboard, QML/Quick and VNC plugins are excluded from the release bundle. PDF generation uses Qt PrintSupport.
 
-`clinic/service.py` contains transaction/permission boundaries and audit writes; `schema.py` has ordered database migrations; `domain.py` owns exact AFN parsing, FDI numbering, calendar conversion and password hashing; `backup.py` uses SQLite `Connection.backup()` and validates complete archives. The UI uses focused dialogs and a central patient page. File copy/hashing, thumbnail generation, and archive operations use worker threads. Clinic data is protected by an application-profile process lock. SQL parameters bind input; dynamic identifiers are restricted to internal allowlists. The SQL data model and domain code can be reused for a later desktop/mobile phase.
+`clinic/service.py` contains transaction/permission boundaries and audit writes; `finance.py` owns draft charges, immutable bill snapshots, exact payments and the statement; `schema.py` has ordered database migrations; `domain.py` owns exact AFN parsing, FDI numbering, calendar conversion and password hashing; `backup.py` uses SQLite `Connection.backup()` and validates complete archives. The UI uses focused dialogs and a central patient page. File copy/hashing, thumbnail generation, and archive operations use worker threads. Clinic data is protected by an application-profile process lock. SQL parameters bind input; dynamic identifiers are restricted to internal allowlists. The SQL data model and domain code can be reused for a later desktop/mobile phase.
 
 ## Build Ubuntu
 
@@ -50,6 +56,8 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -q
 scripts/build.sh
 ```
+
+For a per-user Ubuntu update that refreshes stale launchers without sudo, run `python3 scripts/install-user.py dist/faramarz-dental`, then close and reopen the clinic app. This does not open records.
 
 The script builds an on-directory executable plus a `.deb` with launcher, icon and system dependencies. `faramarz.spec` is the canonical Linux/Windows packaging specification. The dependency lock pins the complete resolved Python graph. Build on Ubuntu 24.04 to reproduce this target; do not assume that this binary supports older glibc releases.
 

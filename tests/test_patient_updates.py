@@ -48,7 +48,7 @@ def test_v2_upgrade_preserves_ids_finances_files_and_legacy_missing_phone(tmp_pa
         store.db.execute("INSERT INTO invoices(id,patient_id,visit_id,date) VALUES(7,41,12,'2020-01-01')")
         store.db.execute("INSERT INTO invoice_items(invoice_id,description,amount) VALUES(7,'Work',250000)")
         store.db.execute("INSERT INTO payments(invoice_id,date,amount,method) VALUES(7,'2020-01-01',100000,'Cash')")
-        store.db.execute("INSERT INTO attachments(patient_id,scope,name,stored,sha256) VALUES(41,'patient','Original','original.txt','hash')")
+        store.db.execute("INSERT INTO attachments(patient_id,scope,name,stored,sha256) VALUES(41,'patient','Original','original.txt','d59c2a5f721ce135ce54628b1ad8ad8b8eb26c8bbe2e2abe1cdca97e2d6ab446')")
     folder=store.root/'attachments';folder.mkdir();(folder/'original.txt').write_text('untouched')
     store.db.close();svc=account(tmp_path/'old')
     p=svc.s.one('SELECT * FROM patients WHERE id=41')

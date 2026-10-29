@@ -13,6 +13,7 @@ from . import i18n
 from .theme import stylesheet,colors,motion_enabled,apply_app_theme,tooth_style
 from .printing import PrintDialog,invoice_html,document_html
 from .components import Card,Hero,StatCard,Chart
+from .finance_ui import FinanceUI
 from .backup import create_backup,restore_backup,apply_retention
 
 PAGES=['Overview','Patients','Appointments','Materials','Purchases','Expenses','Laboratory','Reports','Clinic profile','Settings']
@@ -27,7 +28,7 @@ class Job(QThread):
         except Exception as e: self.failed.emit(str(e))
 
 
-class Window(QMainWindow):
+class Window(FinanceUI,QMainWindow):
     def __init__(self,service,assets):
         super().__init__(); self.svc=service; self.s=service.s; self.assets=Path(assets)
         self.pid=None; self.current='Overview'; self.archived=False; self.jobs=[]; self.report_rows=[]
@@ -51,14 +52,14 @@ class Window(QMainWindow):
     def error(self,message):
         text=tr(message)
         if i18n.LANG=='fa_AF' and text==message and message not in i18n.DARI:
-            text=tr('Please check your entry')
+            text=tr('Please check your entry')+'\n'+message
         QMessageBox.warning(self,tr('Please check your entry'),text)
 
     def confirm(self,message):
         return QMessageBox.question(self,tr('Confirm'),tr(message),QMessageBox.Yes|QMessageBox.No,QMessageBox.No)==QMessageBox.Yes
 
-    def form(self,title,fields,initial=None):
-        d=Form(title,fields,self,initial)
+    def form(self,title,fields,initial=None,on_save=None):
+        d=Form(title,fields,self,initial,submit_callback=on_save)
         if title=='Add treatment':
             choice=d.fields['procedure'][0];price=d.fields['price'][0]
             def update_price():
@@ -165,19 +166,20 @@ class Window(QMainWindow):
         background=self.s.setting('clinic_background')
         if background:hero.set_background(self.s.root/'attachments'/background,int(self.s.setting('background_opacity','15')))
         layout.addWidget(hero)
-        cards=QHBoxLayout();cards.setSpacing(12)
-        stats=[('Today’s visits',str(len(data['visits'])),'Recorded visits',lambda:self.dashboard_records('visits')),
+        cards=QGridLayout();cards.setSpacing(12)
+        stats=[('Patients seen today',str(data['seen_today']),'Distinct patients with visits',lambda:self.dashboard_records('visits')),
+               ('Billed today',afn(data['billed_today']),'Issued invoices less discounts',lambda:self.dashboard_records('today_billed')),
                ('Collected today',afn(data['collected_today']),'Payments less refunds',lambda:self.dashboard_records('today_payments')),
-               ('Outstanding balances',afn(data['outstanding']),'Open patient invoices',lambda:self.dashboard_records('balances')),
+               ('Outstanding balances',afn(data['outstanding']),'All issued invoices less payments',lambda:self.dashboard_records('balances')),
                ('Upcoming appointments',str(len(data['upcoming'])),'Next seven days',lambda:self.dashboard_records('upcoming'))]
-        for title,value,caption,callback in stats:
-            card=StatCard(title,value,caption);card.clicked.connect(lambda fn=callback:self.guard(fn));cards.addWidget(card,1)
+        for i,(title,value,caption,callback) in enumerate(stats):
+            card=StatCard(title,value,caption);card.clicked.connect(lambda fn=callback:self.guard(fn));cards.addWidget(card,i//3,i%3)
         layout.addLayout(cards)
         heading=QHBoxLayout();heading.addWidget(label('The rhythm of your clinic','brand'),1);period=QComboBox()
         for n in (7,30,90):period.addItem(tr('Last {days} days').format(days=n),n)
         period.setCurrentIndex((7,30,90).index(days))
         def change_period():self.dashboard_days=period.currentData();self.overview()
-        period.currentIndexChanged.connect(change_period);heading.addWidget(period);layout.addLayout(heading)
+        period.currentIndexChanged.connect(change_period);heading.addWidget(period);layout.addLayout(heading);layout.addWidget(label(self.date(data['start'])+' — '+self.date(data['end']),'subtitle'))
         charts=QHBoxLayout();charts.setSpacing(12);animated=motion_enabled(self.s)
         trend=Card('Net collections','Payments less refunds');trend_chart=Chart('trend',data['trend'],animated,self.date,bool(data['ledger']));trend.content.addWidget(trend_chart);trend_chart.activated.connect(lambda:self.guard(lambda:self.dashboard_records('payments')));charts.addWidget(trend,2)
         distribution=Card('Treatment mix','Completed treatments');donut=Chart('donut',data['distribution'],animated);distribution.content.addWidget(donut);donut.activated.connect(lambda:self.guard(lambda:self.dashboard_records('treatments')))
@@ -193,6 +195,12 @@ class Window(QMainWindow):
             recent.content.addWidget(self.act(row['name']+'  ·  '+f"P-{row['id']:06}",lambda pid=row['id']:self.patient_detail(pid)))
         if not data['recent_patients']:recent.content.addWidget(label('Register your first patient to begin.','subtitle'))
         recent.content.addStretch();lower.addWidget(recent,1);layout.addLayout(lower)
+        activity=QHBoxLayout();recent_v=Card('Recent visits');recent_p=Card('Recent payments')
+        for rows,card,tab in [(data['recent_visits'],recent_v,0),(data['recent_payments'],recent_p,3)]:
+            for row in rows:card.content.addWidget(self.act(row['name']+' · '+self.date(row['date'])+(' · '+afn(row['amount']) if 'amount' in row else ''),lambda pid=row['patient_id'],tab=tab:self.patient_detail(pid,tab)))
+            if not rows:card.content.addWidget(label('No records yet','subtitle'))
+            activity.addWidget(card,1)
+        layout.addLayout(activity)
         alerts=QHBoxLayout();stock=Card('Low stock');follow=Card('Upcoming follow-ups')
         for row in data['low_stock'][:5]:stock.content.addWidget(self.act(row['name']+'  ·  '+str(row['quantity'])+' '+row['unit'],lambda:self.navigate('Materials')))
         if not data['low_stock']:stock.content.addWidget(label('No low-stock alerts.','subtitle'))
@@ -205,7 +213,8 @@ class Window(QMainWindow):
         if kind=='visits':rows=data['visits'];headers=['Patient','Date','Doctor'];keys=['name',lambda r:self.date(r['date']),'doctor']
         elif kind in ('payments','today_payments'):
             rows=[r for r in data['ledger'] if kind=='payments' or r['date']==today()];headers=['Patient','Date','Amount','Method'];keys=['name',lambda r:self.date(r['date']),lambda r:afn(r['amount']),'method']
-        elif kind=='balances':rows=data['balances'];headers=['Patient','Invoice number','Remaining'];keys=['name',lambda r:f"INV-{r['id']:06}",lambda r:afn(r['balance'])]
+        elif kind in ('billed','today_billed'):rows=[r for r in data['billed'] if kind=='billed' or r['date']==today()];headers=['Patient','Invoice number','Total'];keys=['name',lambda r:f"INV-{r['id']:06}",lambda r:afn(r['total'])]
+        elif kind=='balances':rows=[r for r in data['balances'] if r['balance']!=0];headers=['Patient','Invoice number','Remaining'];keys=['name',lambda r:f"INV-{r['id']:06}",lambda r:afn(r['balance'])]
         elif kind=='upcoming':rows=data['upcoming'];headers=['Patient','Date','Time','Status'];keys=['name',lambda r:self.date(r['starts'][:10]),lambda r:r['starts'][11:16],'status']
         elif kind=='treatments':
             rows=self.s.rows("SELECT t.*,v.patient_id,v.date,p.name FROM treatments t JOIN visits v ON v.id=t.visit_id JOIN patients p ON p.id=v.patient_id WHERE v.date BETWEEN ? AND ? AND t.status='completed'"+(' AND t.procedure=?' if procedure else '')+' ORDER BY t.id DESC',(start,end,procedure) if procedure else (start,end));headers=['Patient','Date','Procedure','Tooth'];keys=['name',lambda r:self.date(r['date']),'procedure','tooth']
@@ -213,7 +222,7 @@ class Window(QMainWindow):
             rows=self.s.rows('SELECT a.*,p.name FROM appointments a JOIN patients p ON p.id=a.patient_id WHERE substr(a.starts,1,10) BETWEEN ? AND ?'+(' AND a.status=?' if procedure else '')+' ORDER BY a.starts',(start,end,procedure) if procedure else (start,end));headers=['Patient','Date','Status'];keys=['name',lambda r:self.date(r['starts'][:10]),'status']
         d=QDialog(self);d.setWindowTitle(tr('Underlying records'));d.resize(850,550);l=QVBoxLayout(d);l.addWidget(label('Underlying records','title'));l.addWidget(label(self.date(start)+' — '+self.date(end),'subtitle'));table=self.table(l,headers,rows,keys)
         def open_patient():
-            r=table.selected();d.accept();self.patient_detail(r['patient_id'],3 if kind in ('payments','today_payments','balances') else 0)
+            r=table.selected();d.accept();self.patient_detail(r['patient_id'],3 if kind in ('payments','today_payments','balances','billed','today_billed') else 0)
         self.actions(l,[('Patient',open_patient,True),('Close',d.accept)]);d.exec()
 
     def choose_patient(self,title='Patient'):
@@ -233,7 +242,7 @@ class Window(QMainWindow):
 
     def quick_payment(self):
         pid=self.choose_patient('Record payment')
-        if pid: self.patient_detail(pid,3)
+        if pid:self.patient_detail(pid,3);self.pay()
 
     def patient_list(self,term=''):
         layout=self.page('Patients')
@@ -267,20 +276,27 @@ class Window(QMainWindow):
         p=self.s.one('SELECT * FROM patients WHERE id=?',(pid,))
         balance=sum(r['balance'] for r in self.svc.balances(pid))
         layout=self.page(p['name'],f"P-{pid:06}   ·   {p['phone'] or '—'}"+'   ·   '+tr('Balance')+': '+afn(balance))
-        if p['alerts'] or p['allergies']: layout.addWidget(label(tr('Clinical alerts')+': '+(p['alerts'] or '—')+'   '+tr('Allergies')+': '+(p['allergies'] or '—'),'alert'))
+        if self.svc.user['role']=='admin' and (p['alerts'] or p['allergies']): layout.addWidget(label(tr('Clinical alerts')+': '+(p['alerts'] or '—')+'   '+tr('Allergies')+': '+(p['allergies'] or '—'),'alert'))
         photo=self.s.setting(f'patient_photo_{pid}')
         if photo:
             image=QLabel();image.setPixmap(QPixmap(str(self.s.root/'attachments'/photo)).scaled(80,80,Qt.KeepAspectRatio,Qt.SmoothTransformation));layout.addWidget(image)
-        self.actions(layout,[('New visit',lambda:self.new_visit(pid),True),('Edit patient',lambda:self.edit_patient(pid)),('Patient photograph',lambda:self.patient_photo(pid)),('Restore patient' if p['archived'] else 'Archive',lambda:self.archive_patient(p))])
+        account=Card();account_row=QHBoxLayout();balance_box=QVBoxLayout();balance_box.addWidget(label('Balance','subtitle'));balance_box.addWidget(label(afn(balance),'metric'));account_row.addLayout(balance_box);account_row.addStretch()
+        for title,fn in [('Add charge',self.add_charge),('Record payment',self.pay)]:account_row.addWidget(self.act(title,fn,title in ('Add charge','Record payment')))
+        account.content.addLayout(account_row)
+        drafts=self.svc.drafts(pid)
+        if drafts:account.content.addWidget(label(tr('Saved draft charges (not yet billed)')+': '+afn(sum(r['amount'] for r in drafts)),'subtitle'))
+        layout.addWidget(account)
+        self.actions(layout,[('New visit',lambda:self.new_visit(pid)),('Statement',self.print_statement),('Edit patient',lambda:self.edit_patient(pid)),('Patient photograph',lambda:self.patient_photo(pid)),('Restore patient' if p['archived'] else 'Archive',lambda:self.archive_patient(p))])
         tabs=QTabWidget(); layout.addWidget(tabs,1)
         sections=[('Overview',self.patient_overview),('Visits & treatments',lambda l,p:self.clinical_tab(l,p,False,True)),('Dental chart',lambda l,p:self.clinical_tab(l,p,True,False)),('Invoices & payments',self.billing_tab),('Photos & documents',self.patient_documents),('Prescriptions',self.prescriptions_tab)]
         for title,fn in sections:
             if self.svc.user['role']!='admin' and title not in ('Overview','Invoices & payments'):continue
-            w=QWidget();l=QVBoxLayout(w);l.setContentsMargins(0,16,0,0);l.setSpacing(14);fn(l,p);tabs.addTab(w,tr(title))
+            w=QWidget();l=QVBoxLayout(w);l.setContentsMargins(0,16,0,0);l.setSpacing(14);fn(l,p);tabs.addTab(w,tr(title).replace('&','&&'))
         self.patient_tabs=tabs
         tabs.setCurrentIndex(tab if self.svc.user['role']=='admin' else (1 if tab==3 else 0))
 
     def patient_overview(self,l,p):
+        l.addWidget(label('Account timeline','brand'));self.account_activity(l,p['id'])
         row=QHBoxLayout();demographics=Card('Patient information');clinical=Card('Medical history')
         for key,title in [('father','Father’s name'),('dob','Birth date'),('estimated_age','Estimated age at registration'),('gender','Gender'),('address','Address'),('email','Email'),('emergency','Emergency contact')]:
             value=self.date(p[key]) if key=='dob' and p[key] else p[key]
@@ -290,7 +306,7 @@ class Window(QMainWindow):
         if self.svc.user['role']=='admin':
             for key,title in [('history','Medical history'),('allergies','Allergies'),('medications','Medications'),('alerts','Clinical alerts'),('consent','Consent notes')]:clinical.content.addWidget(label(tr(title)+'  ·  '+(p[key] or tr('Not provided')),'subtitle'))
             clinical.content.addWidget(self.act('Edit medical notes',lambda:self.edit_section(p,'Medical history',{'history','allergies','medications','alerts','consent'})));row.addWidget(clinical,1)
-        l.addLayout(row);l.addStretch()
+        l.addLayout(row)
 
     def edit_section(self,p,title,keys):
         v=self.form(title,[field for field in PATIENT_FIELDS if field[0] in keys],p)
@@ -340,13 +356,14 @@ class Window(QMainWindow):
             dentition.currentIndexChanged.connect(draw); draw()
             l.addWidget(label('Patient right → left','subtitle')); l.addWidget(label('Upper jaw','subtitle')); l.addWidget(chart); l.addWidget(label('Lower jaw','subtitle')); l.addWidget(label('Select a tooth to record work. Teal: completed · Amber: planned.','subtitle'))
         if show_history:
+            l.addWidget(label('Planned treatments are not billed. Complete treatment, then issue an invoice.','subtitle'))
             self.treatment_table=self.table(l,['Treatment number','Date','Tooth','Procedure','Price','Status'],treatments,['id',lambda r:self.date(r['date']),'tooth','procedure',lambda r:afn(r['price']),'status'],self.treatment_details)
-            self.actions(l,[('Complete treatment',self.complete_treatment)])
+            self.actions(l,[('Edit treatment',self.edit_treatment),('Complete treatment',self.complete_treatment)])
             vt=Table(['Date','Notes','Follow-up'],visits,[lambda r:self.date(r['date']),'notes',lambda r:self.date(r['followup'])]); l.addWidget(vt)
 
     def new_visit(self,pid):
-        self.svc.allowed(clinical=True)
-        v=self.form('New visit',[('doctor','Doctor','line',self.s.setting('display_dari' if i18n.LANG=='fa_AF' else 'display_english','داکتر فرشاد فرامرز' if i18n.LANG=='fa_AF' else 'Dr. Farshad Faramarz')),('date','Date','date',today()),('notes','Notes','text',''),('followup','Follow-up','date_optional','')])
+        self.svc.allowed()
+        v=self.form('New visit',[('doctor','Doctor','line',self.s.setting('display_dari' if i18n.LANG=='fa_AF' else 'display_english','داکتر فرشاد فرامرز' if i18n.LANG=='fa_AF' else 'Dr. Farshad Faramarz')),('date','Date','date',today()),*([('notes','Notes','text',''),('followup','Follow-up','date_optional','')] if self.svc.user['role']=='admin' else [])])
         if v:
             self.svc.visit(pid,**v); self.patient_detail(pid,1)
 
@@ -365,24 +382,9 @@ class Window(QMainWindow):
     def issue_invoice(self,visit_id=None):
         vid=visit_id or self.visit_choice.currentData()
         if not vid: raise ValueError('Choose a record first')
-        v=self.form('Issue invoice',[('discount','Discount','money','0.00')])
+        v=self.form('Issue invoice',[('discount','Discount','money','0.00')],on_save=lambda v:self.svc.invoice(vid,money(v['discount'])))
         if v:
-            self.svc.invoice(vid,money(v['discount'])); self.patient_detail(self.pid,3)
-
-    def billing_tab(self,l,p):
-        invoices=self.s.rows('SELECT * FROM invoices WHERE patient_id=? ORDER BY id DESC',(p['id'],))
-        for inv in invoices: inv.update(self.svc.invoice_totals(inv['id']))
-        self.invoice_table=self.table(l,['Invoice number','Date','Total','Paid','Remaining','Status'],invoices,[lambda r:f"INV-{r['id']:06}",lambda r:self.date(r['date']),lambda r:afn(r['total']),lambda r:afn(r['paid']),lambda r:afn(r['balance']),lambda r:tr('cancelled') if r['void'] else '—'])
-        self.actions(l,[('Record payment',self.pay,True),('Issue invoice',self.billing_invoice),('Refund',lambda:self.pay(True)),('Print / PDF',self.print_invoice),('Void invoice',self.void)])
-        payments=self.s.rows('SELECT pay.* FROM payments pay JOIN invoices i ON i.id=pay.invoice_id WHERE i.patient_id=? ORDER BY pay.id DESC',(p['id'],))
-        l.addWidget(label('Payment history','brand'))
-        self.payment_table=self.table(l,['Receipt number','Invoice number','Date','Amount','Method','Reason'],payments,[lambda r:f"R-{r['id']:06}",lambda r:f"INV-{r['invoice_id']:06}",lambda r:self.date(r['date']),lambda r:afn(r['amount']),'method','reason'],lambda r:PrintDialog(invoice_html(self.svc,r['invoice_id'],r['id']),self).exec())
-        self.actions(l,[('Receipt',self.print_receipt)])
-
-    def billing_invoice(self):
-        visits=self.s.rows("SELECT * FROM visits WHERE patient_id=? ORDER BY id DESC",(self.pid,))
-        v=self.form('Issue invoice',[('visit','New visit',[(r['id'],f"V-{r['id']} · {self.date(r['date'])}") for r in visits],visits[0]['id'] if visits else None),('discount','Discount','money','0.00')])
-        if v and v['visit']:self.svc.invoice(v['visit'],money(v['discount']));self.patient_detail(self.pid,3)
+            self.patient_detail(self.pid,3)
 
     def treatment_details(self,r):
         self.svc.allowed(clinical=True)
@@ -390,13 +392,6 @@ class Window(QMainWindow):
         for key,title in [('procedure','Procedure'),('tooth','Tooth'),('condition','Condition'),('status','Status'),('doctor','Doctor'),('notes','Notes')]:
             l.addWidget(label(title,'brand'));l.addWidget(label(r[key] or 'Not supplied'))
         l.addWidget(button('Close',d.accept));d.exec()
-
-    def pay(self,refund=False):
-        inv=self.invoice_table.selected()
-        v=self.form('Refund' if refund else 'Record payment',[('amount','Amount','money',amount_text((inv['paid'] if refund else inv['balance']))),('method','Method',['Cash','Other'],'Cash'),('reason','Reason','line','')])
-        if v:
-            amount=money(v.pop('amount')); receipt=self.svc.payment(inv['id'],-amount if refund else amount,**v)
-            self.patient_detail(self.pid,3); PrintDialog(invoice_html(self.svc,inv['id'],receipt),self).exec()
 
     def void(self):
         inv=self.invoice_table.selected(); v=self.form('Void invoice',[('reason','Reason','text','')])
@@ -748,9 +743,12 @@ class Window(QMainWindow):
         from .service import prepare_attachment
         def done(records):
             try:
-                for record in records:self.svc.record_attachment(record,pid)
+                self.svc.record_attachments(records,pid)
                 callback(records)
-            except Exception as e:self.error(str(e))
+            except Exception as e:
+                for r in records:
+                    if not self.s.one('SELECT id FROM attachments WHERE stored=?',(r['stored'],)):(self.s.root/'attachments'/r['stored']).unlink(missing_ok=True)
+                self.error(str(e))
         self.background(lambda:prepare_attachment(self.s.root,path,thumbnail),done)
 
     def background(self,fn,callback):
@@ -848,6 +846,13 @@ def authenticate(service,parent=None):
             error.setText(tr(str(e)) if str(e) in i18n.DARI or i18n.LANG=='en' else tr('Please check your entry'))
             attempts[0]+=1;submit_button.setEnabled(False);QTimer.singleShot(min(30000,attempts[0]*1000),lambda:submit_button.setEnabled(True))
     submit_button=button('Create administrator' if first else 'Unlock',submit,True);submit_button.setObjectName('unlock');outer.addWidget(submit_button);password.returnPressed.connect(submit_button.click)
+    if not first:
+        def recover():
+            from .recovery import recovery_dialog
+            try:
+                if recovery_dialog(service.s):password.clear();error.setText(tr('Password reset. Sign in using your new password.'))
+            except Exception as e:error.setText(tr(str(e)))
+        outer.addWidget(button('Forgot password?',recover))
     def change_lang():
         service.s.set_setting('language',language.currentData());i18n.LANG=language.currentData();apply_app_theme(service.s);d.done(2)
     language.currentIndexChanged.connect(change_lang)

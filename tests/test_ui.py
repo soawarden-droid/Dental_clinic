@@ -197,3 +197,72 @@ def test_real_image_controls_upload_remove_and_restart(app,tmp_path,monkeypatch)
     click('Remove');assert svc.s.setting('profile_photo')==''
     assert original.read_bytes()==original_bytes
     root=svc.s.root;w.close();reopened=Store(root);reopened.migrate();assert reopened.setting('profile_photo')=='';assert reopened.rows('SELECT * FROM image_assets')==[];reopened.db.close()
+
+
+def test_real_fee_installments_restart_and_statement(app,tmp_path,monkeypatch):
+    from clinic.printing import statement_html
+    from PySide6.QtTest import QTest
+    svc=Service(Store(tmp_path/'clinic'));svc.register('doctor','a-long-test-password');svc.login('doctor','a-long-test-password')
+    svc.register('desk','reception-password','receptionist');svc.login('desk','reception-password')
+    w=Window(svc,'assets');w.show();app.processEvents()
+    fill_next(app,dict(name='Minimal reception patient',phone='0701234567'));w.new_patient()
+    fill_next(app,{});w.new_visit(1)
+    fill_next(app,dict(amount='500'));w.add_charge()
+    fill_next(app,dict(kind='procedure',description='Filling',amount='2000'));w.add_charge()
+    assert len(svc.drafts(1))==2 and svc.account_totals(1)['balance']==0
+    fill_next(app,dict(discount='0'));w.billing_invoice()
+    assert svc.account_totals(1)==dict(total=250000,paid=0,balance=250000)
+    assert w.invoice_table.records[0]['status']=='unpaid'
+    def receipt(d):
+        # Re-entrant attempts while printing must not open a second payment form.
+        w.pay()
+        path=tmp_path/'receipt.pdf';printer=d.printer();printer.setOutputFormat(QPrinter.PdfFormat);printer.setOutputFileName(str(path));d.document.print_(printer);return QDialog.Accepted
+    monkeypatch.setattr(PrintDialog,'exec',receipt)
+    def pay_twice():
+        d=app.activeModalWidget();d.fields['amount'][0].setText('3000');d.validate()
+        assert not d.submitted and d.error.text() and svc.s.rows('SELECT * FROM payments')==[]
+        d.fields['amount'][0].setText('1000');QTest.mouseClick(d.save_button,Qt.LeftButton);d.validate()
+    QTimer.singleShot(30,pay_twice);w.pay()
+    assert len(svc.s.rows('SELECT * FROM payments'))==1
+    assert svc.account_totals(1)['balance']==150000 and w.invoice_table.records[0]['status']=='partial'
+    assert (tmp_path/'receipt.pdf').read_bytes().startswith(b'%PDF')
+    root=svc.s.root;w.close()
+    svc=Service(Store(root));svc.login('desk','reception-password');w=Window(svc,'assets');w.patient_detail(1)
+    assert svc.account_totals(1)['balance']==150000
+    fill_next(app,{});w.new_visit(1)
+    fill_next(app,dict(amount='1500'));w.pay()
+    assert len(svc.s.rows('SELECT * FROM payments'))==2
+    assert svc.account_totals(1)['balance']==0 and w.invoice_table.records[0]['status']=='paid'
+    html=statement_html(svc,1);assert 'Doctor consultation fee' in html and 'Filling' in html and '1,000.00 AFN' in html and '1,500.00 AFN' in html
+    assert svc.dashboard(7)['billed_today']==svc.dashboard(7)['collected_today']==250000
+    w.close()
+
+
+def test_failed_form_save_stays_open_and_can_be_corrected(app,tmp_path):
+    svc=Service(Store(tmp_path/'profile'));svc.register('doctor','a-long-test-password');svc.login('doctor','a-long-test-password')
+    pid=svc.save_patient(dict(name='Test',phone='0701234567'));vid=svc.visit(pid,'Doctor')
+    d=Form('Add charge',[('description','Description','line',' '),('amount','Amount','money','500')],submit_callback=lambda v:svc.add_charge(vid,v['description'],__import__('clinic.domain',fromlist=['money']).money(v['amount'])))
+    d.show();d.validate();assert not d.submitted and d.error.text() and not svc.s.rows('SELECT * FROM charges')
+    d.fields['description'][0].setText('Consultation');d.validate();d.validate()
+    assert d.submitted and len(svc.s.rows('SELECT * FROM charges'))==1
+    svc.s.db.close()
+
+
+def test_forgot_password_button_opens_explicit_recovery_and_allows_login(app,tmp_path):
+    from clinic.ui import authenticate
+    from PySide6.QtWidgets import QPushButton,QCheckBox
+    from clinic.i18n import tr
+    svc=Service(Store(tmp_path/'profile'));svc.register('doctor','old-local-password');i18n.LANG='en'
+    def reset_and_sign_in():
+        login=app.activeModalWidget()
+        def fill_recovery():
+            recovery=app.activeModalWidget();fields=recovery.findChildren(QLineEdit)
+            fields[0].setText('new-local-password');fields[1].setText('new-local-password');recovery.findChild(QCheckBox).setChecked(True)
+            next(b for b in recovery.findChildren(QPushButton) if b.text()==tr('Reset password')).click()
+        QTimer.singleShot(30,fill_recovery)
+        next(b for b in login.findChildren(QPushButton) if b.text()==tr('Forgot password?')).click()
+        login.findChild(QLineEdit,'username').setText('doctor');login.findChild(QLineEdit,'password').setText('new-local-password');login.findChild(QPushButton,'unlock').click()
+    QTimer.singleShot(30,reset_and_sign_in)
+    assert authenticate(svc) and svc.user['username']=='doctor'
+    assert list((tmp_path/'FaramarzPasswordRecoveryBackups').glob('*.fdbackup'))
+    svc.s.db.close()

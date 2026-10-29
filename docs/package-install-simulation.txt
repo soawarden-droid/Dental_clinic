@@ -7,6 +7,6 @@ Building dependency tree...
 Reading state information...
 The following packages will be upgraded:
   faramarz-dental
-1 upgraded, 0 newly installed, 0 to remove and 77 not upgraded.
-Inst faramarz-dental [0.1.0] (0.2.0 local-deb [amd64])
-Conf faramarz-dental (0.2.0 local-deb [amd64])
+1 upgraded, 0 newly installed, 0 to remove and 63 not upgraded.
+Inst faramarz-dental [0.1.0] (0.3.0 local-deb [amd64])
+Conf faramarz-dental (0.3.0 local-deb [amd64])

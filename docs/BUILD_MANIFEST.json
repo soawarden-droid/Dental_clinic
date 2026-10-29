@@ -1,13 +1,16 @@
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "target": "Ubuntu 24.04 amd64",
-  "package": "faramarz-dental_0.2.0_amd64.deb",
-  "package_bytes": 50789024,
-  "package_sha256": "45d1fe11df24c45da4fec364d3d88f132a9bb8537e810924cfa9c4c0b265e5ee",
-  "executable_sha256": "42808b99fe71dc109657ca79d12adf247dc599bd27e8797903510c79724df7b4",
-  "automated_tests": 32,
+  "package": "faramarz-dental_0.3.0_amd64.deb",
+  "package_bytes": 50815296,
+  "package_sha256": "bd8a51d604305823ea58de6ef3570b6f0e08d2d942c864b29ff4f4bd275cd4c1",
+  "executable_sha256": "018f4acfd53a8b4c0bc3b1e5880e11586d7677371e0dbfee00aa7de045aaada9",
+  "automated_tests": 47,
   "offline_packaged_acceptance": "passed",
   "scaled_packaged_acceptance": "passed at 125%",
-  "schema_version": 4,
-  "windows": "Workflow prepared; no Windows build or execution claimed"
+  "process_restart": "passed",
+  "existing_profile_clone_upgrade": "passed; original values preserved",
+  "schema_version": 5,
+  "windows": "Configuration validated; native build requires Windows",
+  "publication": "User authorized source push to soawarden-droid/Dental_clinic; databases and private backups excluded"
 }

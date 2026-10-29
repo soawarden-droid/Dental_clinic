@@ -3,5 +3,5 @@
   "ipv6_socket_calls": 0,
   "bind_calls": 0,
   "listen_calls": 0,
-  "result": "Version 0.2.0 packaged acceptance passed at 125% scaling in an isolated user/network namespace; Unix desktop/printing IPC only."
+  "result": "Version 0.3.0 exact Debian payload: full financial acceptance passed offline at 125% scaling."
 }

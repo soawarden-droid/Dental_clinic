@@ -1,9 +1,10 @@
 {
-  "usable_seconds_in_process": 1.203,
+  "usable_seconds_in_process": 2.511,
   "checks": [
     "Name-and-phone-only registration: omitted optional fields are SQL NULL",
     "Real account and patient \u2192 visit \u2192 treatment \u2192 invoice \u2192 partial payment \u2192 PDF dialogs",
     "All pages render in English/Dari and light/dark at 1366\u00d7768",
+    "500 AFN consultation + 2000 AFN treatment; 1000 payment, restart, later visit and 1500 payment; paid status and dashboard reconcile",
     "Dari PDF generated; printing leaves balance unchanged",
     "Consistent backup restored into a fresh profile: patient, invoices, payments, attachments, settings and account verified"
   ]

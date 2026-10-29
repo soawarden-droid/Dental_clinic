@@ -18,11 +18,15 @@ def main():
     started=perf_counter()
     os.umask(0o077)
     parser=argparse.ArgumentParser()
+    from clinic import __version__
+    parser.add_argument('--version',action='version',version='Faramarz Dental Clinic '+__version__)
     parser.add_argument('--verify',help='Run packaged acceptance checks in a NEW isolated output folder')
+    parser.add_argument('--recover-password',action='store_true',help='Explicit local account recovery with safety backup; close the clinic app first')
     parser.add_argument('--demo',action='store_true',help='Open a separate fictional demonstration profile')
     parser.add_argument('--smoke',action='store_true',help='Automated packaged startup and SQLite check')
     parser.add_argument('--capture',help='Save demonstration screenshots to this directory')
     args=parser.parse_args()
+    if args.recover_password and (args.verify or args.demo or args.smoke or args.capture):parser.error('Password recovery cannot be combined with testing or demo options')
     if args.verify:
         output=Path(args.verify).resolve()
         if output.exists() and any(output.iterdir()):parser.error('Verification output folder must be new or empty')
@@ -49,6 +53,11 @@ def main():
     i18n.LANG=store.setting('language','en')
     from clinic.theme import apply_app_theme
     apply_app_theme(store)
+    if args.recover_password:
+        from clinic.recovery import recovery_dialog
+        try:
+            if not recovery_dialog(store):return 0
+        except Exception as e:QMessageBox.warning(None,'Faramarz Dental Clinic',str(e));return 1
     if args.verify:
         from clinic.verification import run
         return run(app,service,assets,args.verify,started)
@@ -73,12 +82,13 @@ def main():
     if args.capture:
         window.resize(1366,768)
         target=Path(args.capture);target.mkdir(parents=True,exist_ok=True)
-        states=[('en','light','overview-en-light.png','dashboard'),('en','dark','patient-en-dark.png','patient'),('fa_AF','light','patient-dari-light.png','patient'),('fa_AF','dark','overview-dari-dark.png','dashboard'),('en','light','minimal-patient-form-en.png','form'),('fa_AF','dark','minimal-patient-form-dari-dark.png','form'),('en','light','image-settings-en.png','images'),('fa_AF','dark','image-settings-dari-dark.png','images')]
+        states=[('en','light','overview-en-light.png','dashboard'),('en','dark','patient-en-dark.png','patient'),('fa_AF','light','patient-dari-light.png','patient'),('fa_AF','dark','overview-dari-dark.png','dashboard'),('en','light','minimal-patient-form-en.png','form'),('fa_AF','dark','minimal-patient-form-dari-dark.png','form'),('en','light','image-settings-en.png','images'),('fa_AF','dark','image-settings-dari-dark.png','images'),('en','light','overview-charts-en-light.png','charts'),('fa_AF','dark','overview-charts-dari-dark.png','charts'),('en','light','billing-en-light.png','billing'),('fa_AF','dark','billing-dari-dark.png','billing')]
         def capture(index=0):
             if index==len(states):app.quit();return
             lang,theme,name,kind=states[index];store.set_setting('language',lang);store.set_setting('theme',theme);window.current='Overview';window.build()
             if kind=='patient':window.patient_detail(1)
             elif kind=='images':window.image_settings()
+            elif kind=='billing':window.patient_detail(1,3)
             if kind=='form':
                 from clinic.widgets import Form
                 from clinic.ui import PATIENT_FIELDS
@@ -87,7 +97,10 @@ def main():
                 dialog.fields['phone'][0].setText('070 123 4567');dialog.dirty=False
                 def save_form():dialog.grab().save(str(target/name));dialog.accept()
                 QTimer.singleShot(500,save_form);dialog.exec();QTimer.singleShot(0,lambda:capture(index+1));return
-            def save():window.grab().save(str(target/name));capture(index+1)
+            def save():
+                if kind=='charts':window.pages.currentWidget().verticalScrollBar().setValue(460);app.processEvents()
+                if kind=='billing':window.pages.currentWidget().verticalScrollBar().setValue(310);app.processEvents()
+                window.grab().save(str(target/name));capture(index+1)
             QTimer.singleShot(500,save)
         QTimer.singleShot(500,capture)
     return app.exec()

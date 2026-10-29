@@ -41,7 +41,10 @@ class Store:
         from .schema import MIGRATIONS
         version = self.db.execute('PRAGMA user_version').fetchone()[0]
         if version > len(MIGRATIONS):
-            raise ValueError('Database belongs to a newer application version')
+            raise ValueError('This database needs a newer app. Open the latest Faramarz Dental Clinic version; do not reset or delete your records.')
+        if 0<version<len(MIGRATIONS):
+            from .backup import create_backup
+            create_backup(self.root,self.root.parent/'FaramarzUpgradeBackups')
         for i in range(version, len(MIGRATIONS)):
             try:
                 self.db.executescript('BEGIN IMMEDIATE;\n' + MIGRATIONS[i] + f'\nPRAGMA user_version={i+1};\nCOMMIT;')

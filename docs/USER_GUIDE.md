@@ -52,3 +52,24 @@ The ordinary profile is stored under `~/.local/share/FaramarzDental` on Ubuntu (
 The dashboard shows today’s visits, net payments collected today (receipts minus refunds), outstanding active invoice balances and upcoming appointments over seven days. The trend uses the selected 7/30/90-day period; the donut counts completed treatments by visit date. Click a metric or chart to open its saved records. Empty periods contain no invented activity. In Settings, Reduce motion disables chart entry animations; the system preference is also respected when available.
 
 Open **Clinic profile → Images & appearance** to add, replace, remove or preview the doctor photo, logo, background and gallery. Restore default clears the custom image. Background opacity is adjustable from 0–30%. Changes survive restart; only managed copies without other references are removed. Your original files and unrelated documents are retained. Patient photos have matching controls under **Photos & documents**.
+
+## Fees, partial payments and later visits (0.3.0)
+
+1. Register the patient using name and phone. Open the patient and select **New visit**. Reception can register a non-clinical visit; clinical notes remain restricted to the doctor.
+2. Select **Add charge**. Choose **Doctor consultation fee**, enter a description and `500`, then Save. Add another charge of type **Treatment charge** for `2000`, or have the doctor record and complete a treatment priced at `2000`. Use one of those routes for a given procedure to avoid charging it twice.
+3. In **Invoices & payments**, the saved drafts show AFN 2,500. Drafts survive restart but do not count as debt yet. Select **Issue invoice**, choose the visit and any discount, then Save. The invoice now shows total AFN 2,500, paid AFN 0, balance AFN 2,500 and **unpaid** status. No payment is implied by saving.
+4. Select **Record payment**, choose that invoice, enter the date and `1000`, then Save. Paid becomes AFN 1,000, balance AFN 1,500 and status **partial**. Print or export the receipt. Printing again records no additional money.
+5. On a later visit, reopen the patient and record the new visit if needed. Select **Record payment**, choose the original outstanding invoice and enter `1500`. Balance becomes AFN 0 and status **paid**. Multiple outstanding invoices remain separate; choose which bill this receipt settles.
+6. Select **Statement** for a printable chronological list of visits, final charges, discounts, receipts/refunds and running balance. Drafts are excluded and voided charges remain visible as history.
+
+Before finalization, **Edit draft charge** or the doctor's **Edit treatment** changes the saved draft. After finalization, an administrator must refund any received money with a reason, void the incorrect invoice with a reason, edit the draft, then issue the corrected invoice. Previous invoices and receipts remain in history. No credit/overpayment workflow exists; amounts above the selected invoice's balance are rejected.
+
+Dashboard **Billed today** means invoices issued today, after discounts and excluding voids. **Collected today** means today's receipts minus today's refunds, including payments on older invoices. These two metrics can differ legitimately. Outstanding includes all valid invoices regardless of date. No doctor compensation is calculated from these patient fees.
+
+## Forgotten local password
+
+On the login screen choose **Forgot password?**, select the local account, enter and repeat a new password of at least ten characters, confirm that you own this local profile, then reset. A complete private backup is created under `FaramarzPasswordRecoveryBackups` beside the profile before the password changes. Sign in normally afterward. Records, other accounts and attachments are preserved; the reset is audited.
+
+For local owner support with the clinic app closed, run `faramarz-dental --recover-password` (or `faramarz-dental.exe --recover-password` on Windows). Windows also has a Start Menu recovery shortcut. Recovery is available to the operating-system user who can access the local profile; protect that OS account and use disk encryption. There is no master password or remote password recovery.
+
+If an update reports that the database needs a newer app, open the newest version instead of deleting or downgrading the database. On Ubuntu a per-user install may override an older system package. The supplied `python3 scripts/install-user.py dist/faramarz-dental` refreshes that user installation and Applications shortcut without opening records. Close the old window and reopen afterward.

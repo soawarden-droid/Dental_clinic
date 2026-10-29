@@ -9,7 +9,10 @@ from datetime import datetime, timedelta
 from .domain import now, today, password_hash, password_verify, check_date, phone_normalize, TEETH
 
 
-class Service:
+from .finance import Finance,minor_units,event_time
+
+
+class Service(Finance):
     def __init__(self, store):
         self.s = store
         self.s.migrate()
@@ -25,6 +28,7 @@ class Service:
     def action(self, name, details='', clinical=False, admin=False):
         self.allowed(clinical, admin)
         with self.s.db:
+            if not self.s.db.in_transaction:self.s.db.execute('BEGIN IMMEDIATE')
             yield self.s.db
             self.s.db.execute('INSERT INTO audit(at,actor,action,details) VALUES(?,?,?,?)', (now(), self.user['username'], name, str(details)))
 
@@ -102,6 +106,7 @@ class Service:
         return self.s.rows('SELECT id,name,phone FROM patients WHERE id<>? AND (lower(name)=lower(?) OR (phone<>\'\' AND phone=?))', (exclude, name.strip(), phone_normalize(phone)))
 
     def archive(self, pid, value):
+        if not self.s.one('SELECT id FROM patients WHERE id=?',(pid,)):raise ValueError('Choose a patient first')
         with self.action('patient archive status', f'{pid}: {value}', admin=True) as db:
             db.execute('UPDATE patients SET archived=? WHERE id=?', (int(value), pid))
 
@@ -109,65 +114,26 @@ class Service:
         check_date(followup, True)
         check_date(date or today())
         if not doctor.strip():raise ValueError('Please check your entry')
-        with self.action('visit created', pid, clinical=True) as db:
-            return db.execute('INSERT INTO visits(patient_id,date,doctor,notes,followup) VALUES(?,?,?,?,?)', (pid,date or today(),doctor,notes,followup)).lastrowid
+        self.allowed()
+        if self.user['role']!='admin' and (notes.strip() or followup):raise PermissionError('Administrator access required')
+        with self.action('visit created', pid) as db:
+            return db.execute('INSERT INTO visits(patient_id,date,doctor,notes,followup,created) VALUES(?,?,?,?,?,?)', (pid,date or today(),doctor,notes,followup,event_time())).lastrowid
 
     def treatment(self, visit_id, procedure, price, tooth='', condition='', status='planned', notes=''):
-        if not procedure.strip() or (tooth and tooth not in TEETH) or price < 0:
+        minor_units(price)
+        if not procedure.strip() or (tooth and tooth not in TEETH) or status not in ('planned','completed'):
             raise ValueError('Invalid treatment or tooth number')
         with self.action('treatment recorded', visit_id, clinical=True) as db:
             return db.execute('INSERT INTO treatments(visit_id,procedure,price,tooth,condition,status,notes) VALUES(?,?,?,?,?,?,?)', (visit_id,procedure,price,tooth,condition,status,notes)).lastrowid
 
     def complete(self, treatment_id):
+        if not self.s.one('SELECT id FROM treatments WHERE id=?',(treatment_id,)):raise ValueError('Choose a treatment first')
         with self.action('treatment completed', treatment_id, clinical=True) as db:
             db.execute("UPDATE treatments SET status='completed' WHERE id=?", (treatment_id,))
 
-    def invoice(self, visit_id, discount=0):
-        with self.action('invoice issued', visit_id) as db:
-            visit = db.execute('SELECT * FROM visits WHERE id=?', (visit_id,)).fetchone()
-            items = db.execute("SELECT * FROM treatments WHERE visit_id=? AND status='completed' AND id NOT IN (SELECT ii.treatment_id FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE ii.treatment_id IS NOT NULL AND i.void=0)", (visit_id,)).fetchall()
-            if not items:
-                raise ValueError('No completed unbilled treatments for this visit')
-            if not 0 <= discount <= sum(r['price'] for r in items):
-                raise ValueError('Discount exceeds invoice subtotal')
-            iid = db.execute('INSERT INTO invoices(patient_id,visit_id,date,discount) VALUES(?,?,?,?)', (visit['patient_id'],visit_id,today(),discount)).lastrowid
-            db.executemany('INSERT INTO invoice_items(invoice_id,treatment_id,description,amount) VALUES(?,?,?,?)', [(iid,r['id'],r['procedure']+(' · '+r['tooth'] if r['tooth'] else ''),r['price']) for r in items])
-            return iid
-
-    def invoice_totals(self, iid):
-        r = self.s.one('SELECT * FROM invoices WHERE id=?', (iid,))
-        total = self.s.one('SELECT COALESCE(SUM(amount),0) n FROM invoice_items WHERE invoice_id=?', (iid,))['n'] - r['discount']
-        paid = self.s.one('SELECT COALESCE(SUM(amount),0) n FROM payments WHERE invoice_id=?', (iid,))['n']
-        return {'total': 0 if r['void'] else total, 'paid': paid, 'balance': (0 if r['void'] else total)-paid}
-
-    def payment(self, iid, amount, method, reason='', reversal_of=None):
-        with self.action('payment recorded' if amount>0 else 'payment refunded', iid, admin=amount<0) as db:
-            totals = self.invoice_totals(iid)
-            inv = self.s.one('SELECT * FROM invoices WHERE id=?', (iid,))
-            if amount == 0 or inv['void'] or (amount>0 and amount>totals['balance']) or (amount<0 and -amount>totals['paid']):
-                raise ValueError('Payment exceeds balance or refund exceeds paid amount')
-            if amount<0 and not reason.strip():
-                raise ValueError('A refund reason is required')
-            if reversal_of is not None:
-                original = self.s.one('SELECT * FROM payments WHERE id=? AND invoice_id=?', (reversal_of, iid))
-                if not original or original['amount']<=0:
-                    raise ValueError('Invalid original payment')
-                refunded = self.s.one('SELECT COALESCE(SUM(amount),0) n FROM payments WHERE reversal_of=?', (reversal_of,))['n']
-                if amount>=0 or -amount > original['amount']+refunded:
-                    raise ValueError('Refund exceeds original payment')
-            return db.execute('INSERT INTO payments(invoice_id,date,amount,method,reason,reversal_of) VALUES(?,?,?,?,?,?)', (iid,today(),amount,method,reason,reversal_of)).lastrowid
-
-    def void_invoice(self, iid, reason):
-        if not reason.strip():
-            raise ValueError('A correction reason is required')
-        with self.action('invoice voided', f'{iid}: {reason}', admin=True) as db:
-            if self.invoice_totals(iid)['paid']:
-                raise ValueError('Refund payments before voiding this invoice')
-            db.execute('UPDATE invoices SET void=1,reason=? WHERE id=?', (reason,iid))
-
     def appointment(self, pid, starts, minutes, status='scheduled', notes='', override=False):
         start = datetime.fromisoformat(starts)
-        if not 5 <= minutes <= 480:
+        if type(minutes) is not int or not 5 <= minutes <= 480:
             raise ValueError('Duration must be 5 to 480 minutes')
         end = start+timedelta(minutes=minutes)
         conflicts = self.s.rows("SELECT * FROM appointments WHERE status NOT IN ('cancelled','missed') AND starts<? AND datetime(starts,'+'||minutes||' minutes')>datetime(?)", (end.isoformat(timespec='minutes'),start.isoformat(timespec='minutes')))
@@ -177,6 +143,7 @@ class Service:
             return db.execute('INSERT INTO appointments(patient_id,starts,minutes,status,notes) VALUES(?,?,?,?,?)', (pid,start.isoformat(timespec='minutes'),minutes,status,notes)).lastrowid
 
     def status(self, aid, status):
+        if not self.s.one('SELECT id FROM appointments WHERE id=?',(aid,)):raise ValueError('Choose an appointment first')
         with self.action('appointment status', f'{aid}: {status}') as db:
             db.execute('UPDATE appointments SET status=? WHERE id=?', (status,aid))
 
@@ -187,6 +154,14 @@ class Service:
         allowed_cols = {r['name'] for r in self.s.rows('PRAGMA table_info('+table+')')}-{'id'}
         if not set(values)<=allowed_cols:
             raise ValueError('Unsupported field')
+        if table=='catalogue':minor_units(values.get('price',0))
+        elif table=='expenses':
+            minor_units(values.get('amount'),True);check_date(values.get('date'));
+            if not values.get('category','').strip():raise ValueError('Please check your entry')
+        elif table=='labs':
+            minor_units(values.get('cost'));minor_units(values.get('paid'));check_date(values.get('sent'));check_date(values.get('expected'))
+            if values.get('treatment_id') and not self.s.one('SELECT t.id FROM treatments t JOIN visits v ON v.id=t.visit_id WHERE t.id=? AND v.patient_id=?',(values['treatment_id'],values['patient_id'])):raise ValueError('Choose a treatment for this patient')
+        if table=='prescriptions':clinical=True
         with self.action(table+' added', '', clinical=clinical, admin=table in {'catalogue','materials','suppliers','expenses','labs'}) as db:
             rid = db.execute('INSERT INTO '+table+'('+','.join(values)+') VALUES('+','.join('?' for _ in values)+')', list(values.values())).lastrowid
             if table=='labs' and values.get('paid',0)>0:
@@ -198,6 +173,7 @@ class Service:
 
     def stock(self, mid, quantity, kind, reason='', batch='', expiry='', treatment_id=None):
         check_date(expiry, True)
+        if type(quantity) is not int:raise ValueError('Quantity must be a whole number')
         if not quantity or not reason.strip() or kind not in ('use','wastage','return','adjustment'):
             raise ValueError('Quantity, movement type and reason are required')
         if kind in ('use','wastage','return') and quantity>0:
@@ -216,6 +192,10 @@ class Service:
             db.execute('INSERT INTO stock(material_id,quantity,kind,date,batch,expiry,treatment_id,reason) VALUES(?,?,?,?,?,?,?,?)', (mid,quantity,kind,today(),batch,expiry,treatment_id,reason))
 
     def purchase(self, supplier, items, paid):
+        minor_units(paid)
+        for item in items:
+            if type(item['quantity']) is not int or item['quantity']<=0:raise ValueError('Quantity must be a positive whole number')
+            minor_units(item['unit_cost'])
         total = sum(i['quantity']*i['unit_cost'] for i in items)
         if not items or not 0<=paid<=total:
             raise ValueError('Invalid purchase or paid amount')
@@ -253,14 +233,15 @@ class Service:
         self.allowed(admin=True)
         collected = self.s.one('SELECT COALESCE(SUM(amount),0) n FROM payments WHERE date BETWEEN ? AND ?', (start,end))['n']
         expenses = self.s.one('SELECT COALESCE(SUM(amount),0) n FROM expenses WHERE date BETWEEN ? AND ?', (start,end))['n']
-        billed = sum(self.invoice_totals(r['id'])['total'] for r in self.s.rows('SELECT id FROM invoices WHERE date BETWEEN ? AND ?', (start,end)))
+        billed = self.s.one('SELECT COALESCE(SUM(total),0) n FROM invoice_balances WHERE date BETWEEN ? AND ?',(start,end))['n']
         purchases = self.s.one('SELECT COALESCE(SUM(amount),0) n FROM supplier_payments WHERE date BETWEEN ? AND ?', (start,end))['n']
         lab = self.s.one('SELECT COALESCE(SUM(amount),0) n FROM lab_payments WHERE date BETWEEN ? AND ?', (start,end))['n']
-        outstanding = sum(self.invoice_totals(r['id'])['balance'] for r in self.s.rows('SELECT id FROM invoices'))
+        outstanding = self.s.one('SELECT COALESCE(SUM(balance),0) n FROM invoice_balances')['n']
         return dict(billed=billed,collected=collected,expenses=expenses,purchases=purchases,lab=lab,outstanding=outstanding,cash_surplus=collected-expenses-purchases-lab)
 
 
     def supplier_payment(self, purchase_id, amount):
+        minor_units(amount,True)
         with self.action('supplier payment', purchase_id, admin=True) as db:
             r = self.s.one('SELECT p.paid,COALESCE(SUM(i.quantity*i.unit_cost),0) total FROM purchases p JOIN purchase_items i ON i.purchase_id=p.id WHERE p.id=? GROUP BY p.id',(purchase_id,))
             if not r or amount<=0 or amount>r['total']-r['paid']:
@@ -269,6 +250,7 @@ class Service:
             db.execute('UPDATE purchases SET paid=paid+? WHERE id=?',(amount,purchase_id))
 
     def update_lab(self, lid, status, returned, paid):
+        minor_units(paid)
         check_date(returned,True)
         with self.action('lab updated',lid,admin=True) as db:
             r=self.s.one('SELECT * FROM labs WHERE id=?',(lid,))
@@ -278,21 +260,14 @@ class Service:
                 db.execute('INSERT INTO lab_payments(lab_id,date,amount) VALUES(?,?,?)',(lid,today(),paid-r['paid']))
             db.execute('UPDATE labs SET status=?,returned=?,paid=? WHERE id=?',(status,returned,paid,lid))
 
+    def record_attachments(self,records,pid=None):
+        with self.action('attachments added',len(records),clinical=pid is not None,admin=pid is None) as db:
+            return [db.execute('INSERT INTO attachments(patient_id,scope,name,stored,sha256) VALUES(?,?,?,?,?)',(pid,'patient' if pid else 'profile',r['name'],r['stored'],r['sha256'])).lastrowid for r in records]
+
     def record_attachment(self, meta, pid=None):
         with self.action('attachment added',meta['name'],clinical=pid is not None,admin=pid is None) as db:
             return db.execute('INSERT INTO attachments(patient_id,scope,name,stored,sha256) VALUES(?,?,?,?,?)', (pid,'patient' if pid else 'profile',meta['name'],meta['stored'],meta['sha256'])).lastrowid
 
-
-    def balances(self, patient_id=None):
-        self.allowed()
-        query='''SELECT i.*,p.name,p.phone,
-          CASE WHEN i.void THEN 0 ELSE COALESCE(items.subtotal,0)-i.discount END total,
-          COALESCE(pay.paid,0) paid,
-          CASE WHEN i.void THEN 0 ELSE COALESCE(items.subtotal,0)-i.discount END-COALESCE(pay.paid,0) balance
-          FROM invoices i JOIN patients p ON p.id=i.patient_id
-          LEFT JOIN (SELECT invoice_id,SUM(amount) subtotal FROM invoice_items GROUP BY invoice_id) items ON items.invoice_id=i.id
-          LEFT JOIN (SELECT invoice_id,SUM(amount) paid FROM payments GROUP BY invoice_id) pay ON pay.invoice_id=i.id'''
-        return self.s.rows(query+(' WHERE i.patient_id=?' if patient_id else '')+' ORDER BY i.id DESC',(patient_id,) if patient_id else ())
 
     def dashboard(self, days=30):
         self.allowed()
@@ -309,10 +284,14 @@ class Service:
         trend=[{'date':(date.fromisoformat(start)+timedelta(days=n)).isoformat(),'amount':by_date.get((date.fromisoformat(start)+timedelta(days=n)).isoformat(),0)} for n in range(days)]
         distribution=self.s.rows("SELECT t.procedure,COUNT(*) count FROM treatments t JOIN visits v ON v.id=t.visit_id WHERE v.date BETWEEN ? AND ? AND t.status='completed' GROUP BY t.procedure ORDER BY count DESC,t.procedure",(start,end))
         statuses=self.s.rows('SELECT status,COUNT(*) count FROM appointments WHERE substr(starts,1,10) BETWEEN ? AND ? GROUP BY status ORDER BY count DESC,status',(start,end))
-        balances=[r for r in self.balances() if r['balance']>0]
+        balances=self.balances()
+        billed_today=self.s.one('SELECT COALESCE(SUM(total),0) n FROM invoice_balances WHERE date=?',(end,))['n']
+        billed=self.s.rows('SELECT b.*,p.name FROM invoice_balances b JOIN patients p ON p.id=b.patient_id WHERE b.date BETWEEN ? AND ? AND b.void=0 ORDER BY b.date,b.id',(start,end))
+        recent_visits=self.s.rows('SELECT v.id,v.patient_id,v.date,p.name FROM visits v JOIN patients p ON p.id=v.patient_id ORDER BY v.date DESC,v.id DESC LIMIT 6')
+        recent_payments=self.s.rows('SELECT pay.*,i.patient_id,p.name FROM payments pay JOIN invoices i ON i.id=pay.invoice_id JOIN patients p ON p.id=i.patient_id ORDER BY pay.date DESC,pay.id DESC LIMIT 6')
         low_stock=self.s.rows('SELECT m.*,COALESCE(SUM(s.quantity),0) quantity FROM materials m LEFT JOIN stock s ON s.material_id=m.id GROUP BY m.id HAVING quantity<=minimum ORDER BY m.name')
         followups=self.s.rows('SELECT v.*,p.name FROM visits v JOIN patients p ON p.id=v.patient_id WHERE v.followup>=? ORDER BY v.followup,v.id LIMIT 8',(end,))
-        return dict(start=start,end=end,visits=visits,appointments=appointments,upcoming=upcoming,ledger=ledger,trend=trend,distribution=distribution,statuses=statuses,balances=balances,collected_today=sum(r['amount'] for r in ledger if r['date']==end),outstanding=sum(r['balance'] for r in balances),recent_patients=self.s.rows('SELECT * FROM patients WHERE archived=0 ORDER BY created DESC,id DESC LIMIT 6'),low_stock=low_stock,followups=followups)
+        return dict(start=start,end=end,seen_today=len({r['patient_id'] for r in visits}),billed_today=billed_today,billed=billed,recent_visits=recent_visits,recent_payments=recent_payments,visits=visits,appointments=appointments,upcoming=upcoming,ledger=ledger,trend=trend,distribution=distribution,statuses=statuses,balances=balances,collected_today=sum(r['amount'] for r in ledger if r['date']==end),outstanding=sum(r['balance'] for r in balances),recent_patients=self.s.rows('SELECT * FROM patients WHERE archived=0 ORDER BY created DESC,id DESC LIMIT 6'),low_stock=low_stock,followups=followups)
 
 
     def image_permission(self,slot):

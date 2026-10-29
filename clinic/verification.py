@@ -8,7 +8,7 @@ from PySide6.QtCore import QTimer,QEventLoop
 from PySide6.QtPrintSupport import QPrinter
 from .widgets import Form
 from .ui import Window,authenticate,PAGES
-from .printing import PrintDialog,invoice_html
+from .printing import PrintDialog,invoice_html,statement_html
 from .backup import create_backup,restore_backup
 from .storage import Store
 from .service import Service
@@ -46,8 +46,9 @@ def run(app,service,assets,destination,started):
     assert all(row[key] is None for key in ('father','dob','estimated_age','gender','address','email','allergies','history','emergency'))
     result['checks'].append('Name-and-phone-only registration: omitted optional fields are SQL NULL')
     fill(dict(notes='Acceptance test visit'));w.new_visit(1)
-    fill(dict(procedure='Filling',price='2500.29',tooth='55',status='completed'));w.add_treatment('55')
-    fill(dict(discount='0.29'));w.issue_invoice();w.invoice_table.setCurrentCell(0,0)
+    fill(dict(amount='500'));w.add_charge()
+    fill(dict(procedure='Filling',price='2000',tooth='55',status='completed'));w.add_treatment('55')
+    fill(dict(discount='0'));w.issue_invoice();w.invoice_table.setCurrentCell(0,0)
     original=PrintDialog.exec
     def capture_pdf(d):
         printer=d.printer();printer.setOutputFormat(QPrinter.PdfFormat);printer.setOutputFileName(str(output/'acceptance-receipt.pdf'));d.document.print_(printer);return QDialog.Accepted
@@ -68,6 +69,20 @@ def run(app,service,assets,destination,started):
     from . import i18n
     i18n.LANG='fa_AF';d=PrintDialog(invoice_html(service,1,1));printer=d.printer();printer.setOutputFormat(QPrinter.PdfFormat);printer.setOutputFileName(str(output/'acceptance-dari-receipt.pdf'));d.document.print_(printer)
     before=service.invoice_totals(1);assert before==dict(total=250000,paid=100000,balance=150000)
+    root=service.s.root;w.close();service=Service(Store(root));service.login('acceptance',password);w=Window(service,assets);w.resize(1366,768);w.show();w.patient_detail(1,3);settle()
+    w.grab().save(str(output/'billing-partial-dari-dark.png'))
+    assert service.invoice_totals(1)==before
+    fill(dict(notes='Later visit'));w.new_visit(1)
+    PrintDialog.exec=capture_pdf
+    try:fill(dict(amount='1500'));w.pay()
+    finally:PrintDialog.exec=original
+    before=service.invoice_totals(1);assert before==dict(total=250000,paid=250000,balance=0)
+    assert service.balances(1)[0]['status']=='paid'
+    assert len(service.s.rows('SELECT * FROM payments'))==2
+    data=service.dashboard(7);assert data['billed_today']==data['collected_today']==250000 and data['outstanding']==0
+    result['checks'].append('500 AFN consultation + 2000 AFN treatment; 1000 payment, restart, later visit and 1500 payment; paid status and dashboard reconcile')
+    statement=PrintDialog(statement_html(service,1));printer=statement.printer();printer.setOutputFormat(QPrinter.PdfFormat);printer.setOutputFileName(str(output/'acceptance-statement.pdf'));statement.document.print_(printer)
+    w.patient_detail(1,3);settle();w.grab().save(str(output/'billing-paid-dari-dark.png'))
     result['checks'].append('Dari PDF generated; printing leaves balance unchanged')
     attachment=output/'fictional-attachment.txt';attachment.write_text('Fictional acceptance attachment')
     service.attach(attachment,1);service.attach(attachment)

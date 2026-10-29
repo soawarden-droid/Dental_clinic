@@ -1,4 +1,4 @@
-#define AppVersion "0.2.0"
+#define AppVersion "0.3.0"
 [Setup]
 AppId={{97D482A2-09A5-48C8-AF39-3212F094BEA1}
 AppName=Faramarz Dental Clinic
@@ -20,5 +20,6 @@ Source: "..\dist\faramarz-dental\*"; DestDir: "{app}"; Flags: ignoreversion recu
 [Icons]
 Name: "{group}\Faramarz Dental Clinic"; Filename: "{app}\faramarz-dental.exe"
 Name: "{autodesktop}\Faramarz Dental Clinic"; Filename: "{app}\faramarz-dental.exe"
+Name: "{group}\Recover local password"; Filename: "{app}\faramarz-dental.exe"; Parameters: "--recover-password"
 [Run]
 Filename: "{app}\faramarz-dental.exe"; Description: "Open Faramarz Dental Clinic"; Flags: nowait postinstall skipifsilent

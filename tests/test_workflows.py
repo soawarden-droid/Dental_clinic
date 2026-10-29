@@ -75,7 +75,7 @@ def test_permissions_and_archive(svc):
     pid,vid,tid,iid=bill(svc)
     svc.register('reception','reception-password','receptionist');svc.login('reception','reception-password')
     svc.payment(iid,10000,'Cash')
-    for fn in [lambda:svc.visit(pid,'doctor'),lambda:svc.stock(1,-1,'use','x'),lambda:svc.archive(pid,True),lambda:svc.payment(iid,-10,'Cash','x'),lambda:svc.report(today(),today()),lambda:svc.add_record('materials',{'name':'bad','unit':'x'})]:
+    for fn in [lambda:svc.visit(pid,'doctor','Private medical notes'),lambda:svc.stock(1,-1,'use','x'),lambda:svc.archive(pid,True),lambda:svc.payment(iid,-10,'Cash','x'),lambda:svc.report(today(),today()),lambda:svc.add_record('materials',{'name':'bad','unit':'x'})]:
         with pytest.raises(PermissionError):fn()
     svc.login('doctor','a-long-test-password');svc.archive(pid,True)
     assert not svc.search()
@@ -88,7 +88,7 @@ def test_migration_restart_and_foreign_keys(svc):
     root=svc.s.root;svc.s.db.close();svc.s=Store(root);svc.s.migrate();svc.s.migrate()
     assert svc.s.one('SELECT name FROM patients WHERE id=?',(pid,))['name']=='Fictional Test Child'
     assert svc.s.db.execute('PRAGMA foreign_keys').fetchone()[0]==1
-    assert svc.s.db.execute('PRAGMA user_version').fetchone()[0]==4
+    assert svc.s.db.execute('PRAGMA user_version').fetchone()[0]==5
     with pytest.raises(sqlite3.IntegrityError):
         with svc.s.db:svc.s.db.execute('DELETE FROM patients WHERE id=?',(pid,))
 

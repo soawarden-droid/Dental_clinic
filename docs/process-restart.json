@@ -1,0 +1,8 @@
+{
+  "result": "passed",
+  "financial_records_survive_new_process": true,
+  "invoice_total_minor": 250000,
+  "paid_minor": 250000,
+  "balance_minor": 0,
+  "status": "paid"
+}

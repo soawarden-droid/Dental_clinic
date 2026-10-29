@@ -49,6 +49,23 @@ def invoice_html(service, iid, payment_id=None):
     return document_html(service,'Receipt' if payment_id else 'Invoice',patient,rows,[(tr('Discount'),inv['discount']),('Total',totals['total']),('Paid',totals['paid']),('Remaining',totals['balance'])])
 
 
+def statement_html(service,patient_id,start=None,end=None):
+    account=service.statement(patient_id,start,end)
+    patient=service.s.one('SELECT * FROM patients WHERE id=?',(patient_id,))
+    rows=[]
+    if start:rows.append((tr('Opening balance'),afn(account['opening'])))
+    for event in account['events']:
+        desc=tr(event['description']) if event['kind']=='visit' else event['description']
+        title=display_date(event['date'],service.s.setting('calendar')=='solar',i18n.LANG=='fa_AF')+' · '+tr(event['kind'])+' · '+desc
+        if event['invoice_id']:title+=' · INV-'+format(event['invoice_id'],'06')
+        if event['kind'] in ('payment','refund'):title+=' · R-'+format(event['id'],'06')
+        if event['status']=='void':title+=' · '+tr('void')
+        value=afn(event['payment'] if event['kind'] in ('payment','refund') else event['charge'])+' · '+tr('Balance')+': '+afn(event['balance'])
+        rows.append((title,value))
+    totals=account['totals']
+    return document_html(service,'Patient statement',patient,rows,[('Billed',totals['total']),('Paid',totals['paid']),('Remaining',totals['balance'])],tr('Draft charges are not included. Voided bills are reversed by a separate history entry.'))
+
+
 def make_printer(paper):
     printer = QPrinter(QPrinter.HighResolution)
     if paper=='receipt':

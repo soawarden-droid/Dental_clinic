@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QFormLayout,QLabel,QLineEdit,QTextEdit,QComboBox,QSpinBox,QCheckBox,QDialogButtonBox,QScrollArea,QWidget,QPushButton,QTableWidget,QTableWidgetItem,QAbstractItemView,QHeaderView,QMessageBox,QApplication,QToolButton)
 from PySide6.QtCore import Qt, QTimer
+from shiboken6 import isValid
 from .i18n import tr
 from .domain import parse_date,display_date,today,money,phone_normalize
 
@@ -8,7 +9,13 @@ def button(text, callback, primary=False):
     b = QPushButton(tr(text))
     if primary: b.setObjectName('primary')
     b.setCursor(Qt.PointingHandCursor)
-    b.clicked.connect(lambda checked=False: callback())
+    def invoke(checked=False):
+        if getattr(b,'_running',False):return
+        b._running=True;b.setEnabled(False)
+        try:callback()
+        finally:
+            if isValid(b):b._running=False;b.setEnabled(True)
+    b.clicked.connect(invoke)
     return b
 
 
@@ -20,7 +27,7 @@ def label(text, kind=''):
 
 class Form(QDialog):
     """Reusable accessible forms; dates accept the chosen calendar, stored as ISO."""
-    def __init__(self, title, fields, parent=None, initial=None):
+    def __init__(self, title, fields, parent=None, initial=None,submit_callback=None):
         super().__init__(parent)
         self.setWindowTitle(tr(title)); self.resize(570, min(680,190+len(fields)*56,QApplication.primaryScreen().availableGeometry().height()-70))
         self.fields = {}; self.field_errors={}; self.dirty = False
@@ -84,7 +91,7 @@ class Form(QDialog):
         self.error = label(''); self.error.setObjectName('error'); layout.addWidget(self.error)
         bb = QDialogButtonBox(); bb.addButton(tr('Save'),QDialogButtonBox.AcceptRole); bb.addButton(tr('Cancel'),QDialogButtonBox.RejectRole)
         bb.accepted.connect(self.validate); bb.rejected.connect(self.reject); layout.addWidget(bb)
-        self.result_values = None
+        self.result_values = None;self.result_record=None;self.submit_callback=submit_callback;self.submitted=False;self.saving=False;self.save_button=bb.button(QDialogButtonBox.Save) or next(b for b in bb.buttons() if bb.buttonRole(b)==QDialogButtonBox.AcceptRole)
 
     def changed(self,*args): self.dirty = True
 
@@ -115,10 +122,19 @@ class Form(QDialog):
         return result
 
     def validate(self):
+        if self.submitted or self.saving:return
+        self.saving=True;self.save_button.setEnabled(False)
         try:
-            self.result_values=self.values(); self.accept()
-        except (ValueError,TypeError) as e:
-            self.error.setText(tr(str(e)) if str(e) in __import__('clinic.i18n',fromlist=['DARI']).DARI else tr('Please check your entry'))
+            values=self.values()
+            record=self.submit_callback(dict(values)) if self.submit_callback else None
+            self.result_values=values;self.result_record=record;self.submitted=True;self.accept()
+        except Exception as e:
+            import logging
+            if not isinstance(e,(ValueError,PermissionError)):logging.exception('Form save failed')
+            self.error.setText(tr(str(e)))
+        finally:
+            self.saving=False
+            if not self.submitted:self.save_button.setEnabled(True)
 
     def reject(self):
         if self.dirty and QMessageBox.question(self,tr('Confirm'),tr('Unsaved changes will be lost. Continue?'),QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:
@@ -147,9 +163,9 @@ class Table(QTableWidget):
                 self.setItem(r,c,item)
                 if headers[c]=='Status' and value:
                     from .theme import colors
-                    p=colors();tone=p.mint if value in ('completed','arrived','returned') else p.danger if value in ('cancelled','missed','delayed') else p.lilac
+                    p=colors();tone=p.mint if value in ('completed','arrived','returned','paid') else p.danger if value in ('cancelled','missed','delayed','void','unpaid') else p.lilac
                     badge=QLabel(tr(str(value)));badge.setAlignment(Qt.AlignCenter);badge.setObjectName('statusBadge');badge.setStyleSheet('QLabel#statusBadge {color:'+tone+';background:'+p.soft+';border-radius:11px;padding:3px 7px;}')
-                    box=QWidget();bl=QHBoxLayout(box);bl.setContentsMargins(5,7,5,7);bl.addWidget(badge);self.setCellWidget(r,c,box)
+                    box=QWidget();bl=QHBoxLayout(box);bl.setContentsMargins(5,0,5,0);bl.addWidget(badge);self.setCellWidget(r,c,box)
         self.setSortingEnabled(False)
 
     def selected(self):

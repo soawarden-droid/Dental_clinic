@@ -1,34 +1,34 @@
 {
-  "binary": "/tmp/faramarz-020-payload/opt/faramarz-dental/faramarz-dental",
+  "binary": "/tmp/faramarz-030-final-payload/opt/faramarz-dental/faramarz-dental",
   "network": "isolated user/network namespace, no network interfaces enabled",
   "profile": "Fresh empty profile per trial; no human authentication time",
   "platform": "xcb Qt rendering on Ubuntu 24.04; warm OS disk cache after build",
   "trials": [
     {
       "trial": 1,
-      "wall_seconds": 1.524,
-      "resident_memory": "91788 kB"
+      "wall_seconds": 1.252,
+      "resident_memory": "94072 kB"
     },
     {
       "trial": 2,
-      "wall_seconds": 1.021,
-      "resident_memory": "91960 kB"
+      "wall_seconds": 1.732,
+      "resident_memory": "93460 kB"
     },
     {
       "trial": 3,
-      "wall_seconds": 1.08,
-      "resident_memory": "91876 kB"
+      "wall_seconds": 1.532,
+      "resident_memory": "94008 kB"
     },
     {
       "trial": 4,
-      "wall_seconds": 1.111,
-      "resident_memory": "91924 kB"
+      "wall_seconds": 1.238,
+      "resident_memory": "94064 kB"
     },
     {
       "trial": 5,
-      "wall_seconds": 0.928,
-      "resident_memory": "91876 kB"
+      "wall_seconds": 1.299,
+      "resident_memory": "93808 kB"
     }
   ],
-  "median_seconds": 1.08
+  "median_seconds": 1.299
 }
